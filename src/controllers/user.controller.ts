@@ -13,4 +13,9 @@ export const userController = {
         const user = await userService.updateProfile(req.userId!, req.body);
         res.status(200).json({ success: true, user });
     }),
+
+    changePassword: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        await userService.changePassword(req.userId!, req.body);
+        res.status(200).json({ success: true });
+    }),
 };
