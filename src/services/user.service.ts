@@ -53,12 +53,12 @@ export const userService = {
         if (!user.password) {
             throw new AppError(
                 "This account uses Google Sign-In and has no password to change.",
-                401
+                403
             );
         }
 
         const isMatch = await bcrypt.compare(data.oldPassword, user.password);
-        if (!isMatch) throw new AppError("Old password is incorrect", 401);
+        if (!isMatch) throw new AppError("Old password is incorrect", 403);
 
         const hashedPassword = await bcrypt.hash(data.newPassword, 10);
         await prisma.user.update({
