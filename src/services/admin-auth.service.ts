@@ -23,4 +23,10 @@ export const adminAuthService = {
         const token = signToken({ adminId: admin.id, role: admin.role });
         return { user: toPublicAdmin(admin), token };
     },
+
+    async getById(adminId: string) {
+        const admin = await prisma.admin.findUnique({ where: { id: adminId } });
+        if (!admin) throw new AppError("Admin not found", 404);
+        return toPublicAdmin(admin);
+    },
 };
