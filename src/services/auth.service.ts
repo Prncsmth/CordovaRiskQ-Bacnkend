@@ -68,6 +68,7 @@ export const authService = {
         // Find by googleId first (returning Google user), then by email
         // (existing password account signing in with Google for the first time).
         let user = await prisma.user.findUnique({ where: { googleId } });
+        let isNewUser = false;
 
         if (!user) {
             user = await prisma.user.findUnique({ where: { email } });
@@ -83,6 +84,7 @@ export const authService = {
                 user = await prisma.user.create({
                     data: { email, name, googleId },
                 });
+                isNewUser = true;
             }
         }
 
@@ -90,6 +92,7 @@ export const authService = {
         return {
             user: { id: user.id, email: user.email, name: user.name },
             token,
+            isNewUser,
         };
     },
 };
