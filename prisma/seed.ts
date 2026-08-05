@@ -3,7 +3,10 @@ import { prisma } from "../src/lib/prisma";
 
 async function main() {
   const email = process.env.ADMIN_SEED_EMAIL || "admin@cordova-riskq.local";
-  const password = process.env.ADMIN_SEED_PASSWORD || "ChangeMe123!";
+  const password = process.env.ADMIN_SEED_PASSWORD;
+  if (!password) {
+    throw new Error("ADMIN_SEED_PASSWORD is required — refusing to seed a default admin password.");
+  }
   const name = process.env.ADMIN_SEED_NAME || "System Administrator";
 
   const hashedPassword = await bcrypt.hash(password, 10);

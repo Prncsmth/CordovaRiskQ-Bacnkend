@@ -19,7 +19,10 @@ export function authenticate(
     const token = header.slice("Bearer ".length);
 
     try {
-        const payload = verifyToken(token) as { userId: string };
+        const payload = verifyToken(token) as { userId?: string };
+        if (!payload.userId) {
+            return next(new AppError("Invalid or expired token", 401));
+        }
         req.userId = payload.userId;
         next();
     } catch {
