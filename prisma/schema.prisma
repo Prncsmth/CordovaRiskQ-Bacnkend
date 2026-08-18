@@ -14,15 +14,18 @@ datasource db {
 
 
 model User {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String?
-  googleId  String?  @unique
-  name      String?
-  mobile    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  sosAlerts SosAlert[]
+  id                 String     @id @default(uuid())
+  email              String     @unique
+  password           String?
+  googleId           String?    @unique
+  name               String?
+  mobile             String?
+  role               String     @default("citizen")
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  sosAlerts          SosAlert[]
+  reportedIncidents  Incident[] @relation("ReportedIncidents")
+  acceptedIncidents  Incident[] @relation("AcceptedIncidents")
 }
 
 model SosAlert {
@@ -33,4 +36,23 @@ model SosAlert {
   longitude Float?
   status    String   @default("active")
   createdAt DateTime @default(now())
+}
+
+model Incident {
+  id                     String   @id @default(uuid())
+  source                 String
+  reporterId             String
+  reporter               User     @relation("ReportedIncidents", fields: [reporterId], references: [id])
+  sosAlertId             String?
+  category               String
+  details                String?
+  locationLabel          String
+  latitude               Float?
+  longitude              Float?
+  urgency                String
+  status                 String   @default("pending")
+  acceptedByResponderId  String?
+  acceptedBy             User?    @relation("AcceptedIncidents", fields: [acceptedByResponderId], references: [id])
+  createdAt              DateTime @default(now())
+  updatedAt              DateTime @updatedAt
 }
