@@ -22,4 +22,15 @@ model User {
   mobile    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  sosAlerts SosAlert[]
+}
+
+model SosAlert {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  latitude  Float?
+  longitude Float?
+  status    String   @default("active")
+  createdAt DateTime @default(now())
 }
