@@ -36,6 +36,25 @@ export const incidentService = {
         });
     },
 
+    async createFromSos(
+        reporterId: string,
+        sosAlertId: string,
+        data: { latitude?: number; longitude?: number }
+    ) {
+        return prisma.incident.create({
+            data: {
+                source: "sos",
+                reporterId,
+                sosAlertId,
+                category: "sos",
+                locationLabel: "SOS Alert",
+                latitude: data.latitude,
+                longitude: data.longitude,
+                urgency: "high",
+            },
+        });
+    },
+
     async list() {
         return prisma.incident.findMany({
             where: { status: { in: NON_TERMINAL_STATUSES } },
