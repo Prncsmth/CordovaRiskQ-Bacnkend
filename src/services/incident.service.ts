@@ -62,6 +62,13 @@ export const incidentService = {
         });
     },
 
+    async listByReporter(reporterId: string) {
+        return prisma.incident.findMany({
+            where: { reporterId },
+            orderBy: { createdAt: "desc" },
+        });
+    },
+
     async getById(id: string) {
         const incident = await prisma.incident.findUnique({ where: { id } });
         if (!incident) throw new AppError("Incident not found", 404);

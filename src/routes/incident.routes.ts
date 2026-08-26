@@ -16,6 +16,7 @@ router.post(
     incidentController.create
 );
 router.get("/incidents", authenticate, incidentController.list);
+router.get("/incidents/mine", authenticate, incidentController.listMine);
 router.get("/incidents/:id", authenticate, incidentController.getById);
 router.patch("/incidents/:id/accept", authenticate, incidentController.accept);
 router.patch(
