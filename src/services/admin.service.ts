@@ -11,6 +11,7 @@ export const adminService = {
             id: user.id,
             name: user.name,
             email: user.email,
+            mobile: user.mobile,
             role: user.role,
             createdAt: user.createdAt,
         }));
