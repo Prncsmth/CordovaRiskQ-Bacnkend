@@ -66,3 +66,13 @@ model Admin {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+model TideStatus {
+  id              String    @id // always "current" -- singleton row, upserted in place
+  seaLevelM       Float
+  nextExtremeAt   DateTime?
+  nextExtremeType String?   // "high" | "low"
+  floodRiskLevel  String    // "normal" | "watch" | "warning"
+  fetchedAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+}
