@@ -5,6 +5,12 @@ import { AppError } from "@/utils/AppError";
 
 const STORMGLASS_BASE_URL = "https://api.stormglass.io/v2";
 
+// Skip a redundant Stormglass call if we already have a recent reading --
+// guards against `tsx watch` restarting the server (and re-polling) on
+// every file save during development, and against overlapping polls
+// burning quota if a previous run is slow.
+const FRESHNESS_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+
 type StormglassSeaLevelResponse = {
     data: { time: string; sg: number }[];
 };
@@ -42,8 +48,8 @@ async function fetchFromStormglass(): Promise<{
         `&start=${now.toISOString()}&end=${twoDaysOut.toISOString()}`;
 
     const [seaLevelRes, extremesRes] = await Promise.all([
-        fetch(seaLevelUrl, { headers }),
-        fetch(extremesUrl, { headers }),
+        fetch(seaLevelUrl, { headers, signal: AbortSignal.timeout(15_000) }),
+        fetch(extremesUrl, { headers, signal: AbortSignal.timeout(15_000) }),
     ]);
 
     if (!seaLevelRes.ok || !extremesRes.ok) {
@@ -56,12 +62,12 @@ async function fetchFromStormglass(): Promise<{
     const seaLevelBody = (await seaLevelRes.json()) as StormglassSeaLevelResponse;
     const extremesBody = (await extremesRes.json()) as StormglassExtremesResponse;
 
-    const seaLevelPoint = seaLevelBody.data[0];
-    if (!seaLevelPoint) {
-        throw new AppError("Stormglass returned no sea-level data", 502);
+    const seaLevelPoint = seaLevelBody.data?.[0];
+    if (!seaLevelPoint || typeof seaLevelPoint.sg !== "number") {
+        throw new AppError("Stormglass returned malformed sea-level data", 502);
     }
 
-    const nextExtreme = extremesBody.data[0];
+    const nextExtreme = Array.isArray(extremesBody.data) ? extremesBody.data[0] : undefined;
 
     return {
         seaLevelM: seaLevelPoint.sg,
@@ -79,8 +85,14 @@ function deriveFloodRiskLevel(seaLevelM: number): "normal" | "watch" | "warning"
 }
 
 async function refreshTideStatus(): Promise<void> {
+    const existing = await prisma.tideStatus.findUnique({ where: { id: "current" } });
+    if (existing && Date.now() - existing.updatedAt.getTime() < FRESHNESS_WINDOW_MS) {
+        return;
+    }
+
     const { seaLevelM, nextExtremeAt, nextExtremeType } = await fetchFromStormglass();
     const floodRiskLevel = deriveFloodRiskLevel(seaLevelM);
+    const fetchedAt = new Date();
 
     await prisma.tideStatus.upsert({
         where: { id: "current" },
@@ -90,17 +102,25 @@ async function refreshTideStatus(): Promise<void> {
             nextExtremeAt,
             nextExtremeType,
             floodRiskLevel,
+            fetchedAt,
         },
         update: {
             seaLevelM,
             nextExtremeAt,
             nextExtremeType,
             floodRiskLevel,
+            fetchedAt,
         },
     });
 }
 
-async function getLatest() {
+async function getLatest(): Promise<{
+    seaLevelM: number;
+    nextExtremeAt: Date | null;
+    nextExtremeType: string | null;
+    floodRiskLevel: string;
+    updatedAt: Date;
+}> {
     const row = await prisma.tideStatus.findUnique({ where: { id: "current" } });
     if (!row) {
         throw new AppError("Tide data not yet available", 503);
