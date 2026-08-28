@@ -8,8 +8,13 @@ const STORMGLASS_BASE_URL = "https://api.stormglass.io/v2";
 // Skip a redundant Stormglass call if we already have a recent reading --
 // guards against `tsx watch` restarting the server (and re-polling) on
 // every file save during development, and against overlapping polls
-// burning quota if a previous run is slow.
-const FRESHNESS_WINDOW_MS = 60 * 60 * 1000; // 1 hour
+// burning quota if a previous run is slow. startTidePolling() polls
+// immediately on every server boot, and the poll interval is 8 hours
+// (see tidePolling.ts), so this window is kept just under that: a
+// restart within 7 hours of the last successful poll is free, while a
+// restart after a longer gap, or the regular 8h scheduled tick, still
+// triggers a real Stormglass call.
+const FRESHNESS_WINDOW_MS = 7 * 60 * 60 * 1000; // 7 hours
 
 type StormglassSeaLevelResponse = {
     data: { time: string; sg: number }[];

@@ -6,7 +6,7 @@ import { tideService } from "@/services/tide.service";
 // 3 Stormglass calls/poll (sea-level + extremes + weather) = 9 requests/day,
 // staying under the account's confirmed 10/day quota with a 1-request
 // margin. tide.service.ts's own freshness check additionally no-ops a
-// redundant call within the last hour, e.g. from a dev-server restart.
+// redundant call within the last ~7 hours, e.g. from a dev-server restart.
 const POLL_INTERVAL_MS = 8 * 60 * 60 * 1000;
 
 let pollInFlight = false;
