@@ -20,7 +20,7 @@ export const adminService = {
     async updateUserRole(targetUserId: string, role: string) {
         const target = await prisma.user.findUnique({ where: { id: targetUserId } });
         if (!target) throw new AppError("User not found", 404);
-        if (target.role === "admin") {
+        if (target.role.toLowerCase() === "admin") {
             throw new AppError("Cannot change an admin's role", 403);
         }
 

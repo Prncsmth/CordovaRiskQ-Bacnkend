@@ -10,7 +10,7 @@ export async function requireAdmin(
 ) {
     try {
         const user = await prisma.user.findUnique({ where: { id: req.userId } });
-        if (!user || user.role !== "admin") {
+        if (!user || user.role.toLowerCase() !== "admin") {
             return next(new AppError("Admin access required", 403));
         }
         next();

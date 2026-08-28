@@ -12,6 +12,7 @@ export const userService = {
             name: user.name,
             email: user.email,
             mobile: user.mobile,
+            role: user.role,
         };
     },
 
