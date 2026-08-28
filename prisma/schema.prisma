@@ -68,11 +68,13 @@ model Admin {
 }
 
 model TideStatus {
-  id              String    @id // always "current" -- singleton row, upserted in place
-  seaLevelM       Float
-  nextExtremeAt   DateTime?
-  nextExtremeType String?   // "high" | "low"
-  floodRiskLevel  String    // "normal" | "watch" | "warning"
-  fetchedAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  id                 String    @id // always "current" -- singleton row, upserted in place
+  seaLevelM          Float
+  nextExtremeAt      DateTime?
+  nextExtremeType    String?   // "high" | "low"
+  floodRiskLevel     String    // "normal" | "watch" | "warning"
+  airTemperatureC    Float
+  weatherDescription String    // "Clear skies" | "Partly cloudy" | "Cloudy" | "Light rain" | "Heavy rain"
+  fetchedAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 }
