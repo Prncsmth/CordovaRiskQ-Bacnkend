@@ -19,14 +19,29 @@ type StormglassExtremesResponse = {
     data: { time: string; type: "high" | "low"; height: number }[];
 };
 
-// Response shapes per Stormglass v2 docs (tide/sea-level/point and
-// tide/extremes/point). If your account returns a different source key
-// than "sg" for sea level, adjust seaLevelPoint.sg below after checking
-// the raw response in Task 4/5's manual verification step.
+// NOTE: unlike tide/sea-level/point and tide/extremes/point (which nest
+// readings under a "data" array), weather/point nests readings under an
+// "hours" array -- confirmed against the live response (see Task 2 Step 1).
+type StormglassWeatherResponse = {
+    hours: {
+        time: string;
+        airTemperature: { sg: number };
+        cloudCover: { sg: number };
+        precipitation: { sg: number };
+    }[];
+};
+
+// Response shapes per Stormglass v2 docs (tide/sea-level/point,
+// tide/extremes/point, weather/point). If your account returns a different
+// source key than "sg" for any parameter, adjust the extraction below after
+// checking the raw response (see this task's Step 1).
 async function fetchFromStormglass(): Promise<{
     seaLevelM: number;
     nextExtremeAt: Date | null;
     nextExtremeType: "high" | "low" | null;
+    airTemperatureC: number;
+    cloudCoverPct: number;
+    precipitationMm: number;
 }> {
     const apiKey = process.env.STORMGLASS_API_KEY;
     if (!apiKey) {
@@ -46,25 +61,42 @@ async function fetchFromStormglass(): Promise<{
         `${STORMGLASS_BASE_URL}/tide/extremes/point` +
         `?lat=${CORDOVA_CENTER.latitude}&lng=${CORDOVA_CENTER.longitude}` +
         `&start=${now.toISOString()}&end=${twoDaysOut.toISOString()}`;
+    const weatherUrl =
+        `${STORMGLASS_BASE_URL}/weather/point` +
+        `?lat=${CORDOVA_CENTER.latitude}&lng=${CORDOVA_CENTER.longitude}` +
+        `&start=${now.toISOString()}&end=${oneHourOut.toISOString()}` +
+        `&params=airTemperature,cloudCover,precipitation`;
 
-    const [seaLevelRes, extremesRes] = await Promise.all([
+    const [seaLevelRes, extremesRes, weatherRes] = await Promise.all([
         fetch(seaLevelUrl, { headers, signal: AbortSignal.timeout(15_000) }),
         fetch(extremesUrl, { headers, signal: AbortSignal.timeout(15_000) }),
+        fetch(weatherUrl, { headers, signal: AbortSignal.timeout(15_000) }),
     ]);
 
-    if (!seaLevelRes.ok || !extremesRes.ok) {
+    if (!seaLevelRes.ok || !extremesRes.ok || !weatherRes.ok) {
         throw new AppError(
-            `Stormglass request failed (sea-level ${seaLevelRes.status}, extremes ${extremesRes.status})`,
+            `Stormglass request failed (sea-level ${seaLevelRes.status}, extremes ${extremesRes.status}, weather ${weatherRes.status})`,
             502,
         );
     }
 
     const seaLevelBody = (await seaLevelRes.json()) as StormglassSeaLevelResponse;
     const extremesBody = (await extremesRes.json()) as StormglassExtremesResponse;
+    const weatherBody = (await weatherRes.json()) as StormglassWeatherResponse;
 
     const seaLevelPoint = seaLevelBody.data?.[0];
     if (!seaLevelPoint || typeof seaLevelPoint.sg !== "number") {
         throw new AppError("Stormglass returned malformed sea-level data", 502);
+    }
+
+    const weatherPoint = weatherBody.hours?.[0];
+    if (
+        !weatherPoint ||
+        typeof weatherPoint.airTemperature?.sg !== "number" ||
+        typeof weatherPoint.cloudCover?.sg !== "number" ||
+        typeof weatherPoint.precipitation?.sg !== "number"
+    ) {
+        throw new AppError("Stormglass returned malformed weather data", 502);
     }
 
     const nextExtreme = Array.isArray(extremesBody.data) ? extremesBody.data[0] : undefined;
@@ -73,6 +105,9 @@ async function fetchFromStormglass(): Promise<{
         seaLevelM: seaLevelPoint.sg,
         nextExtremeAt: nextExtreme ? new Date(nextExtreme.time) : null,
         nextExtremeType: nextExtreme ? nextExtreme.type : null,
+        airTemperatureC: weatherPoint.airTemperature.sg,
+        cloudCoverPct: weatherPoint.cloudCover.sg,
+        precipitationMm: weatherPoint.precipitation.sg,
     };
 }
 
@@ -84,14 +119,26 @@ function deriveFloodRiskLevel(seaLevelM: number): "normal" | "watch" | "warning"
     return "normal";
 }
 
+// Placeholder thresholds -- not calibrated against real conditions. Retune
+// once real weather-condition data is available to compare against.
+function deriveWeatherDescription(cloudCoverPct: number, precipitationMm: number): string {
+    if (precipitationMm > 4) return "Heavy rain";
+    if (precipitationMm > 0.5) return "Light rain";
+    if (cloudCoverPct > 70) return "Cloudy";
+    if (cloudCoverPct > 30) return "Partly cloudy";
+    return "Clear skies";
+}
+
 async function refreshTideStatus(): Promise<void> {
     const existing = await prisma.tideStatus.findUnique({ where: { id: "current" } });
     if (existing && Date.now() - existing.updatedAt.getTime() < FRESHNESS_WINDOW_MS) {
         return;
     }
 
-    const { seaLevelM, nextExtremeAt, nextExtremeType } = await fetchFromStormglass();
+    const { seaLevelM, nextExtremeAt, nextExtremeType, airTemperatureC, cloudCoverPct, precipitationMm } =
+        await fetchFromStormglass();
     const floodRiskLevel = deriveFloodRiskLevel(seaLevelM);
+    const weatherDescription = deriveWeatherDescription(cloudCoverPct, precipitationMm);
     const fetchedAt = new Date();
 
     await prisma.tideStatus.upsert({
@@ -102,6 +149,8 @@ async function refreshTideStatus(): Promise<void> {
             nextExtremeAt,
             nextExtremeType,
             floodRiskLevel,
+            airTemperatureC,
+            weatherDescription,
             fetchedAt,
         },
         update: {
@@ -109,6 +158,8 @@ async function refreshTideStatus(): Promise<void> {
             nextExtremeAt,
             nextExtremeType,
             floodRiskLevel,
+            airTemperatureC,
+            weatherDescription,
             fetchedAt,
         },
     });
@@ -119,6 +170,8 @@ async function getLatest(): Promise<{
     nextExtremeAt: Date | null;
     nextExtremeType: string | null;
     floodRiskLevel: string;
+    airTemperatureC: number;
+    weatherDescription: string;
     updatedAt: Date;
 }> {
     const row = await prisma.tideStatus.findUnique({ where: { id: "current" } });
@@ -131,6 +184,8 @@ async function getLatest(): Promise<{
         nextExtremeAt: row.nextExtremeAt,
         nextExtremeType: row.nextExtremeType,
         floodRiskLevel: row.floodRiskLevel,
+        airTemperatureC: row.airTemperatureC,
+        weatherDescription: row.weatherDescription,
         updatedAt: row.updatedAt,
     };
 }
