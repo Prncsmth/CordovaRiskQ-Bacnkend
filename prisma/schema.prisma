@@ -21,12 +21,14 @@ model User {
   name               String?
   mobile             String?
   role               String     @default("citizen")
+  pushToken          String?
   createdAt          DateTime   @default(now())
   updatedAt          DateTime   @updatedAt
   sosAlerts          SosAlert[]
   reportedIncidents  Incident[] @relation("ReportedIncidents")
   acceptedIncidents  Incident[] @relation("AcceptedIncidents")
   announcements      Announcement[]
+  notifications      Notification[]
 }
 
 model SosAlert {
@@ -91,4 +93,15 @@ model Announcement {
   createdBy       User     @relation(fields: [createdByUserId], references: [id])
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id])
+  type      String   // "announcement" | "incident_status" | "tide_risk"
+  title     String
+  body      String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
 }
