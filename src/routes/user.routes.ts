@@ -5,6 +5,7 @@ import { validate } from "@/middlewares/validate.middleware";
 import {
     updateProfileSchema,
     changePasswordSchema,
+    updatePushTokenSchema,
 } from "@/validations/user.validation";
 
 const router = Router();
@@ -21,6 +22,12 @@ router.post(
     authenticate,
     validate(changePasswordSchema),
     userController.changePassword
+);
+router.patch(
+    "/users/push-token",
+    authenticate,
+    validate(updatePushTokenSchema),
+    userController.updatePushToken
 );
 
 export default router;

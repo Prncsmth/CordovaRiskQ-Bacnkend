@@ -18,4 +18,9 @@ export const userController = {
         await userService.changePassword(req.userId!, req.body);
         res.status(200).json({ success: true });
     }),
+
+    updatePushToken: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        await userService.updatePushToken(req.userId!, req.body.token);
+        res.status(200).json({ success: true });
+    }),
 };

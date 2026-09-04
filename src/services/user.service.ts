@@ -66,4 +66,11 @@ export const userService = {
             data: { password: hashedPassword },
         });
     },
+
+    async updatePushToken(userId: string, token: string) {
+        await prisma.user.update({
+            where: { id: userId },
+            data: { pushToken: token },
+        });
+    },
 };
