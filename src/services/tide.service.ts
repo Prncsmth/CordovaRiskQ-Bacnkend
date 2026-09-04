@@ -2,6 +2,7 @@
 import { CORDOVA_CENTER } from "@/constants/location";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
+import { notificationService } from "@/services/notification.service";
 
 const STORMGLASS_BASE_URL = "https://api.stormglass.io/v2";
 
@@ -134,6 +135,16 @@ function deriveWeatherDescription(cloudCoverPct: number, precipitationMm: number
     return "Clear skies";
 }
 
+const RISK_SEVERITY: Record<string, number> = { normal: 0, watch: 1, warning: 2 };
+
+const RISK_NOTIFICATION_COPY: Record<"watch" | "warning", { title: string; body: string }> = {
+    watch: { title: "Flood risk: Watch", body: "Water levels are elevated — stay alert." },
+    warning: {
+        title: "Flood risk: Warning",
+        body: "Flood risk in low-lying areas — avoid the causeway.",
+    },
+};
+
 async function refreshTideStatus(): Promise<void> {
     const existing = await prisma.tideStatus.findUnique({ where: { id: "current" } });
     if (existing && Date.now() - existing.updatedAt.getTime() < FRESHNESS_WINDOW_MS) {
@@ -168,6 +179,21 @@ async function refreshTideStatus(): Promise<void> {
             fetchedAt,
         },
     });
+
+    const isEscalation =
+        existing !== null && RISK_SEVERITY[floodRiskLevel] > RISK_SEVERITY[existing.floodRiskLevel];
+
+    if (isEscalation && (floodRiskLevel === "watch" || floodRiskLevel === "warning")) {
+        const copy = RISK_NOTIFICATION_COPY[floodRiskLevel];
+        const citizens = await prisma.user.findMany({
+            where: { role: "citizen" },
+            select: { id: true },
+        });
+        await notificationService.createForUsers(
+            citizens.map((c) => c.id),
+            { type: "tide_risk", title: copy.title, body: copy.body }
+        );
+    }
 }
 
 async function getLatest(): Promise<{
