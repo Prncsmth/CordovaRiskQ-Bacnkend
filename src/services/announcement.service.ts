@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
+import { notificationService } from "@/services/notification.service";
 
 export const announcementService = {
     async getActive(barangayName?: string) {
@@ -35,7 +36,7 @@ export const announcementService = {
             barangayName?: string;
         }
     ) {
-        return prisma.announcement.create({
+        const announcement = await prisma.announcement.create({
             data: {
                 title: data.title,
                 content: data.content,
@@ -45,6 +46,19 @@ export const announcementService = {
                 createdByUserId,
             },
         });
+
+        if (data.audience === "All Users") {
+            const citizens = await prisma.user.findMany({
+                where: { role: "citizen" },
+                select: { id: true },
+            });
+            await notificationService.createForUsers(
+                citizens.map((c) => c.id),
+                { type: "announcement", title: announcement.title, body: announcement.content }
+            );
+        }
+
+        return announcement;
     },
 
     async remove(id: string) {
