@@ -20,8 +20,18 @@ const STATUS_NOTIFICATION_COPY: Record<string, { title: string; body: string }> 
     cancelled: { title: "Report cancelled", body: "Your report was cancelled." },
 };
 
-async function notifyStatusChange(reporterId: string, status: string) {
-    const copy = STATUS_NOTIFICATION_COPY[status];
+// SOS-sourced incidents don't have a reporter-authored "report" -- swap in
+// alert-appropriate copy for the statuses whose default text says "report".
+const SOS_STATUS_NOTIFICATION_COPY: Partial<Record<string, { title: string; body: string }>> = {
+    lobby: { title: "Responder assigned", body: "A responder has accepted your SOS alert." },
+    completed: { title: "Alert resolved", body: "Your SOS alert has been resolved." },
+    cancelled: { title: "Alert cancelled", body: "Your SOS alert was cancelled." },
+};
+
+async function notifyStatusChange(reporterId: string, status: string, source?: string) {
+    const copy =
+        (source === "sos" ? SOS_STATUS_NOTIFICATION_COPY[status] : undefined) ??
+        STATUS_NOTIFICATION_COPY[status];
     if (!copy) return;
     await notificationService.createForUsers([reporterId], {
         type: "incident_status",
@@ -106,7 +116,7 @@ export const incidentService = {
             data: { status: "lobby", acceptedByResponderId: responderId },
         });
 
-        await notifyStatusChange(updated.reporterId, updated.status);
+        await notifyStatusChange(updated.reporterId, updated.status, updated.source);
         return updated;
     },
 
@@ -117,12 +127,19 @@ export const incidentService = {
             throw new AppError("Not your incident", 403);
         }
 
+        // No-op a retried/duplicate PATCH that doesn't actually change the
+        // status -- avoids re-updating updatedAt and re-notifying the
+        // reporter for a status they were already notified about.
+        if (incident.status === status) {
+            return incident;
+        }
+
         const updated = await prisma.incident.update({
             where: { id },
             data: { status },
         });
 
-        await notifyStatusChange(updated.reporterId, updated.status);
+        await notifyStatusChange(updated.reporterId, updated.status, updated.source);
         return updated;
     },
 };
