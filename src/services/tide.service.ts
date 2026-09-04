@@ -185,14 +185,11 @@ async function refreshTideStatus(): Promise<void> {
 
     if (isEscalation && (floodRiskLevel === "watch" || floodRiskLevel === "warning")) {
         const copy = RISK_NOTIFICATION_COPY[floodRiskLevel];
-        const citizens = await prisma.user.findMany({
-            where: { role: "citizen" },
-            select: { id: true },
+        await notificationService.createForAllCitizens({
+            type: "tide_risk",
+            title: copy.title,
+            body: copy.body,
         });
-        await notificationService.createForUsers(
-            citizens.map((c) => c.id),
-            { type: "tide_risk", title: copy.title, body: copy.body }
-        );
     }
 }
 

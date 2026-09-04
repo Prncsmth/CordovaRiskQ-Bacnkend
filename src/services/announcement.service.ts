@@ -48,14 +48,11 @@ export const announcementService = {
         });
 
         if (data.audience === "All Users") {
-            const citizens = await prisma.user.findMany({
-                where: { role: "citizen" },
-                select: { id: true },
+            await notificationService.createForAllCitizens({
+                type: "announcement",
+                title: announcement.title,
+                body: announcement.content,
             });
-            await notificationService.createForUsers(
-                citizens.map((c) => c.id),
-                { type: "announcement", title: announcement.title, body: announcement.content }
-            );
         }
 
         return announcement;
