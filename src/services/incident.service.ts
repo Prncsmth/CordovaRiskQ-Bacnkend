@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
+import { notificationService } from "@/services/notification.service";
 
 const URGENCY_BY_CATEGORY: Record<string, string> = {
     fire: "high",
@@ -10,6 +11,24 @@ const URGENCY_BY_CATEGORY: Record<string, string> = {
 };
 
 const NON_TERMINAL_STATUSES = ["pending", "lobby", "on_the_way", "arrived"];
+
+const STATUS_NOTIFICATION_COPY: Record<string, { title: string; body: string }> = {
+    lobby: { title: "Responder assigned", body: "A responder has accepted your report." },
+    on_the_way: { title: "Responder en route", body: "Your responder is on the way." },
+    arrived: { title: "Responder arrived", body: "Your responder has arrived at the location." },
+    completed: { title: "Report resolved", body: "Your report has been resolved." },
+    cancelled: { title: "Report cancelled", body: "Your report was cancelled." },
+};
+
+async function notifyStatusChange(reporterId: string, status: string) {
+    const copy = STATUS_NOTIFICATION_COPY[status];
+    if (!copy) return;
+    await notificationService.createForUsers([reporterId], {
+        type: "incident_status",
+        title: copy.title,
+        body: copy.body,
+    });
+}
 
 export const incidentService = {
     async create(
@@ -82,10 +101,13 @@ export const incidentService = {
             throw new AppError("Incident already accepted", 409);
         }
 
-        return prisma.incident.update({
+        const updated = await prisma.incident.update({
             where: { id },
             data: { status: "lobby", acceptedByResponderId: responderId },
         });
+
+        await notifyStatusChange(updated.reporterId, updated.status);
+        return updated;
     },
 
     async updateStatus(id: string, responderId: string, status: string) {
@@ -95,9 +117,12 @@ export const incidentService = {
             throw new AppError("Not your incident", 403);
         }
 
-        return prisma.incident.update({
+        const updated = await prisma.incident.update({
             where: { id },
             data: { status },
         });
+
+        await notifyStatusChange(updated.reporterId, updated.status);
+        return updated;
     },
 };
