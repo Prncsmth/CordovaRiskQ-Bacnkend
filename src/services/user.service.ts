@@ -68,6 +68,14 @@ export const userService = {
     },
 
     async updatePushToken(userId: string, token: string) {
+        // Clear this token from any other user's row first -- on a shared
+        // device, a stale token left behind after a logout/login switch
+        // could otherwise deliver a different user's notifications to
+        // whoever currently holds that device.
+        await prisma.user.updateMany({
+            where: { pushToken: token, id: { not: userId } },
+            data: { pushToken: null },
+        });
         await prisma.user.update({
             where: { id: userId },
             data: { pushToken: token },
