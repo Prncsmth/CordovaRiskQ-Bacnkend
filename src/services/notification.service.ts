@@ -74,15 +74,19 @@ export const notificationService = {
     ) {
         if (userIds.length === 0) return;
 
-        await prisma.notification.createMany({
-            data: userIds.map((userId) => ({ userId, ...data })),
-        });
+        try {
+            await prisma.notification.createMany({
+                data: userIds.map((userId) => ({ userId, ...data })),
+            });
 
-        const recipients = await prisma.user.findMany({
-            where: { id: { in: userIds }, pushToken: { not: null } },
-            select: { id: true, pushToken: true },
-        });
+            const recipients = await prisma.user.findMany({
+                where: { id: { in: userIds }, pushToken: { not: null } },
+                select: { id: true, pushToken: true },
+            });
 
-        await sendPushToRecipients(recipients, { title: data.title, body: data.body });
+            await sendPushToRecipients(recipients, { title: data.title, body: data.body });
+        } catch (error) {
+            console.error("Failed to create notifications for users:", error);
+        }
     },
 };
