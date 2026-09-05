@@ -28,7 +28,12 @@ const SOS_STATUS_NOTIFICATION_COPY: Partial<Record<string, { title: string; body
     cancelled: { title: "Alert cancelled", body: "Your SOS alert was cancelled." },
 };
 
-async function notifyStatusChange(reporterId: string, status: string, source?: string) {
+async function notifyStatusChange(
+    reporterId: string,
+    incidentId: string,
+    status: string,
+    source?: string
+) {
     const copy =
         (source === "sos" ? SOS_STATUS_NOTIFICATION_COPY[status] : undefined) ??
         STATUS_NOTIFICATION_COPY[status];
@@ -37,6 +42,7 @@ async function notifyStatusChange(reporterId: string, status: string, source?: s
         type: "incident_status",
         title: copy.title,
         body: copy.body,
+        referenceId: incidentId,
     });
 }
 
@@ -98,10 +104,31 @@ export const incidentService = {
         });
     },
 
-    async getById(id: string) {
+    async getById(id: string, requesterId: string) {
         const incident = await prisma.incident.findUnique({ where: { id } });
         if (!incident) throw new AppError("Incident not found", 404);
-        return incident;
+
+        const requester = await prisma.user.findUnique({ where: { id: requesterId } });
+        if (requester?.role === "citizen" && incident.reporterId !== requesterId) {
+            throw new AppError("Not your report", 403);
+        }
+
+        // Shaped rather than the raw row -- keeps internal identifiers
+        // (reporterId, acceptedByResponderId, sosAlertId, source) off the
+        // wire now that citizens hit this endpoint directly for their own
+        // report detail, not just responders viewing incidents to accept.
+        return {
+            id: incident.id,
+            category: incident.category,
+            details: incident.details,
+            locationLabel: incident.locationLabel,
+            latitude: incident.latitude,
+            longitude: incident.longitude,
+            urgency: incident.urgency,
+            status: incident.status,
+            createdAt: incident.createdAt,
+            updatedAt: incident.updatedAt,
+        };
     },
 
     async accept(id: string, responderId: string) {
@@ -116,7 +143,7 @@ export const incidentService = {
             data: { status: "lobby", acceptedByResponderId: responderId },
         });
 
-        await notifyStatusChange(updated.reporterId, updated.status, updated.source);
+        await notifyStatusChange(updated.reporterId, updated.id, updated.status, updated.source);
         return updated;
     },
 
@@ -139,7 +166,7 @@ export const incidentService = {
             data: { status },
         });
 
-        await notifyStatusChange(updated.reporterId, updated.status, updated.source);
+        await notifyStatusChange(updated.reporterId, updated.id, updated.status, updated.source);
         return updated;
     },
 };

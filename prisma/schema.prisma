@@ -96,14 +96,15 @@ model Announcement {
 }
 
 model Notification {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  type      String   // "announcement" | "incident_status" | "tide_risk"
-  title     String
-  body      String
-  read      Boolean  @default(false)
-  createdAt DateTime @default(now())
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  type        String   // "announcement" | "incident_status" | "tide_risk"
+  title       String
+  body        String
+  read        Boolean  @default(false)
+  referenceId String?  // e.g. the Incident id for "incident_status" notifications
+  createdAt   DateTime @default(now())
 
   @@index([userId, createdAt])
 }

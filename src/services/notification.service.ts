@@ -15,6 +15,7 @@ type NotificationData = {
     type: "announcement" | "incident_status" | "tide_risk";
     title: string;
     body: string;
+    referenceId?: string;
 };
 
 function chunk<T>(items: T[], size: number): T[][] {

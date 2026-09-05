@@ -20,7 +20,7 @@ export const incidentController = {
     }),
 
     getById: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const incident = await incidentService.getById(req.params.id as string);
+        const incident = await incidentService.getById(req.params.id as string, req.userId!);
         res.status(200).json({ success: true, incident });
     }),
 
