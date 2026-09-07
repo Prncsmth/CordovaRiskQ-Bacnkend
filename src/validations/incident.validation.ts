@@ -11,3 +11,7 @@ export const createIncidentSchema = z.object({
 export const updateIncidentStatusSchema = z.object({
     status: z.enum(["on_the_way", "arrived", "completed", "cancelled"]),
 });
+
+export const updateMyResponderStatusSchema = z.object({
+    status: z.enum(["joined", "declined", "on_the_way", "arrived", "left"]),
+});

@@ -5,6 +5,7 @@ import { validate } from "@/middlewares/validate.middleware";
 import {
     createIncidentSchema,
     updateIncidentStatusSchema,
+    updateMyResponderStatusSchema,
 } from "@/validations/incident.validation";
 
 const router = Router();
@@ -18,7 +19,12 @@ router.post(
 router.get("/incidents", authenticate, incidentController.list);
 router.get("/incidents/mine", authenticate, incidentController.listMine);
 router.get("/incidents/:id", authenticate, incidentController.getById);
-router.patch("/incidents/:id/accept", authenticate, incidentController.accept);
+router.patch(
+    "/incidents/:id/responders/me",
+    authenticate,
+    validate(updateMyResponderStatusSchema),
+    incidentController.updateMyResponderStatus,
+);
 router.patch(
     "/incidents/:id/status",
     authenticate,

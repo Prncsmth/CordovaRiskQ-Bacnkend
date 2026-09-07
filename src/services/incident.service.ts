@@ -1,6 +1,13 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
 import { notificationService } from "@/services/notification.service";
+import {
+    deriveIncidentStatus,
+    isActiveStatus,
+    isRosterTransitionAllowed,
+    pickAcceptedByResponderId,
+    type ResponderRosterStatus,
+} from "@/services/incidentRoster";
 
 const URGENCY_BY_CATEGORY: Record<string, string> = {
     fire: "high",
@@ -44,6 +51,77 @@ async function notifyStatusChange(
         body: copy.body,
         referenceId: incidentId,
     });
+}
+
+type ResponderRowWithName = {
+    id: string;
+    responderId: string;
+    status: string;
+    createdAt: Date;
+    responder: { name: string | null };
+};
+
+function shapeResponders(rows: ResponderRowWithName[]) {
+    const activeRows = rows.filter((r) => isActiveStatus(r.status as ResponderRosterStatus));
+    return {
+        respondersCount: activeRows.length,
+        acceptedByResponderId: pickAcceptedByResponderId(
+            rows.map((r) => ({
+                id: r.id,
+                responderId: r.responderId,
+                status: r.status as ResponderRosterStatus,
+                createdAt: r.createdAt,
+            })),
+        ),
+        activeResponders: activeRows.map((r) => ({
+            id: r.responderId,
+            name: r.responder.name ?? "Responder",
+            status: r.status,
+        })),
+    };
+}
+
+// The full shape any responder-facing endpoint returns for one incident:
+// the citizen-safe fields plus the roster summary and the caller's own
+// status. Used by updateMyResponderStatus/updateStatus (this file, below)
+// and by list()/getById() (Task 6) so every endpoint a responder hits
+// returns a consistent, fully-populated shape -- critical for
+// updateMyResponderStatus specifically, since the frontend derives its
+// next UI phase directly from this response's `myStatus`.
+function buildResponderFacingIncident(
+    incident: {
+        id: string;
+        category: string;
+        details: string | null;
+        locationLabel: string;
+        latitude: number | null;
+        longitude: number | null;
+        urgency: string;
+        status: string;
+        createdAt: Date;
+        updatedAt: Date;
+    },
+    responderRows: ResponderRowWithName[],
+    requesterId: string,
+) {
+    const shaped = shapeResponders(responderRows);
+    const myRow = responderRows.find((r) => r.responderId === requesterId);
+    return {
+        id: incident.id,
+        category: incident.category,
+        details: incident.details,
+        locationLabel: incident.locationLabel,
+        latitude: incident.latitude,
+        longitude: incident.longitude,
+        urgency: incident.urgency,
+        status: incident.status,
+        createdAt: incident.createdAt,
+        updatedAt: incident.updatedAt,
+        respondersCount: shaped.respondersCount,
+        acceptedByResponderId: shaped.acceptedByResponderId,
+        responders: shaped.activeResponders,
+        myStatus: myRow?.status ?? "pending",
+    };
 }
 
 export const incidentService = {
@@ -131,20 +209,53 @@ export const incidentService = {
         };
     },
 
-    async accept(id: string, responderId: string) {
+    async updateMyResponderStatus(
+        id: string,
+        responderId: string,
+        targetStatus: ResponderRosterStatus,
+    ) {
         const incident = await prisma.incident.findUnique({ where: { id } });
         if (!incident) throw new AppError("Incident not found", 404);
-        if (incident.status !== "pending") {
-            throw new AppError("Incident already accepted", 409);
+
+        const existingRow = await prisma.incidentResponder.findUnique({
+            where: { incidentId_responderId: { incidentId: id, responderId } },
+        });
+        const currentStatus = (existingRow?.status as ResponderRosterStatus | undefined) ?? null;
+
+        if (!isRosterTransitionAllowed(currentStatus, targetStatus)) {
+            throw new AppError(
+                `Cannot move from ${currentStatus ?? "no status"} to ${targetStatus}`,
+                409,
+            );
         }
 
-        const updated = await prisma.incident.update({
-            where: { id },
-            data: { status: "lobby", acceptedByResponderId: responderId },
+        await prisma.incidentResponder.upsert({
+            where: { incidentId_responderId: { incidentId: id, responderId } },
+            update: { status: targetStatus },
+            create: { incidentId: id, responderId, status: targetStatus },
         });
 
-        await notifyStatusChange(updated.reporterId, updated.id, updated.status, updated.source);
-        return updated;
+        const allRows = await prisma.incidentResponder.findMany({
+            where: { incidentId: id },
+            include: { responder: { select: { name: true } } },
+        });
+        const activeStatuses = allRows
+            .filter((r) => isActiveStatus(r.status as ResponderRosterStatus))
+            .map((r) => r.status as ResponderRosterStatus);
+        const newStatus = deriveIncidentStatus(activeStatuses);
+
+        let updatedIncident = incident;
+        if (newStatus !== incident.status) {
+            updatedIncident = await prisma.incident.update({ where: { id }, data: { status: newStatus } });
+            await notifyStatusChange(
+                updatedIncident.reporterId,
+                updatedIncident.id,
+                updatedIncident.status,
+                updatedIncident.source,
+            );
+        }
+
+        return buildResponderFacingIncident(updatedIncident, allRows, responderId);
     },
 
     async updateStatus(id: string, responderId: string, status: string) {
