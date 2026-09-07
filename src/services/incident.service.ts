@@ -258,26 +258,38 @@ export const incidentService = {
         return buildResponderFacingIncident(updatedIncident, allRows, responderId);
     },
 
-    async updateStatus(id: string, responderId: string, status: string) {
+    async updateStatus(id: string, responderId: string, status: "completed" | "cancelled") {
         const incident = await prisma.incident.findUnique({ where: { id } });
         if (!incident) throw new AppError("Incident not found", 404);
-        if (incident.acceptedByResponderId !== responderId) {
-            throw new AppError("Not your incident", 403);
+
+        const myRow = await prisma.incidentResponder.findUnique({
+            where: { incidentId_responderId: { incidentId: id, responderId } },
+        });
+        if (myRow?.status !== "arrived") {
+            throw new AppError("You must be on-scene to close this incident", 403);
         }
 
         // No-op a retried/duplicate PATCH that doesn't actually change the
         // status -- avoids re-updating updatedAt and re-notifying the
         // reporter for a status they were already notified about.
-        if (incident.status === status) {
-            return incident;
+        let updatedIncident = incident;
+        if (incident.status !== status) {
+            updatedIncident = await prisma.incident.update({
+                where: { id },
+                data: { status },
+            });
+            await notifyStatusChange(
+                updatedIncident.reporterId,
+                updatedIncident.id,
+                updatedIncident.status,
+                updatedIncident.source,
+            );
         }
 
-        const updated = await prisma.incident.update({
-            where: { id },
-            data: { status },
+        const allRows = await prisma.incidentResponder.findMany({
+            where: { incidentId: id },
+            include: { responder: { select: { name: true } } },
         });
-
-        await notifyStatusChange(updated.reporterId, updated.id, updated.status, updated.source);
-        return updated;
+        return buildResponderFacingIncident(updatedIncident, allRows, responderId);
     },
 };
