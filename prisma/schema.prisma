@@ -26,7 +26,7 @@ model User {
   updatedAt          DateTime   @updatedAt
   sosAlerts          SosAlert[]
   reportedIncidents  Incident[] @relation("ReportedIncidents")
-  acceptedIncidents  Incident[] @relation("AcceptedIncidents")
+  respondedIncidents IncidentResponder[]
   announcements      Announcement[]
   notifications      Notification[]
 }
@@ -54,10 +54,22 @@ model Incident {
   longitude              Float?
   urgency                String
   status                 String   @default("pending")
-  acceptedByResponderId  String?
-  acceptedBy             User?    @relation("AcceptedIncidents", fields: [acceptedByResponderId], references: [id])
+  responders             IncidentResponder[]
   createdAt              DateTime @default(now())
   updatedAt              DateTime @updatedAt
+}
+
+model IncidentResponder {
+  id          String   @id @default(uuid())
+  incidentId  String
+  incident    Incident @relation(fields: [incidentId], references: [id])
+  responderId String
+  responder   User     @relation(fields: [responderId], references: [id])
+  status      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([incidentId, responderId])
 }
 
 model Admin {
