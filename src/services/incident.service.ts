@@ -168,10 +168,25 @@ export const incidentService = {
         });
     },
 
-    async list() {
-        return prisma.incident.findMany({
-            where: { status: { in: NON_TERMINAL_STATUSES } },
+    async list(responderId: string) {
+        const incidents = await prisma.incident.findMany({
+            where: {
+                status: { in: NON_TERMINAL_STATUSES },
+                responders: { none: { responderId, status: "declined" } },
+            },
             orderBy: { createdAt: "desc" },
+            include: { responders: { include: { responder: { select: { name: true } } } } },
+        });
+
+        return incidents.map(({ responders, ...incident }) => {
+            const shaped = shapeResponders(responders);
+            const myRow = responders.find((r) => r.responderId === responderId);
+            return {
+                ...incident,
+                acceptedByResponderId: shaped.acceptedByResponderId,
+                respondersCount: shaped.respondersCount,
+                myStatus: myRow?.status ?? "pending",
+            };
         });
     },
 
@@ -183,7 +198,10 @@ export const incidentService = {
     },
 
     async getById(id: string, requesterId: string) {
-        const incident = await prisma.incident.findUnique({ where: { id } });
+        const incident = await prisma.incident.findUnique({
+            where: { id },
+            include: { responders: { include: { responder: { select: { name: true } } } } },
+        });
         if (!incident) throw new AppError("Incident not found", 404);
 
         const requester = await prisma.user.findUnique({ where: { id: requesterId } });
@@ -191,22 +209,24 @@ export const incidentService = {
             throw new AppError("Not your report", 403);
         }
 
-        // Shaped rather than the raw row -- keeps internal identifiers
-        // (reporterId, acceptedByResponderId, sosAlertId, source) off the
-        // wire now that citizens hit this endpoint directly for their own
-        // report detail, not just responders viewing incidents to accept.
-        return {
-            id: incident.id,
-            category: incident.category,
-            details: incident.details,
-            locationLabel: incident.locationLabel,
-            latitude: incident.latitude,
-            longitude: incident.longitude,
-            urgency: incident.urgency,
-            status: incident.status,
-            createdAt: incident.createdAt,
-            updatedAt: incident.updatedAt,
-        };
+        if (requester?.role === "citizen") {
+            const shaped = shapeResponders(incident.responders);
+            return {
+                id: incident.id,
+                category: incident.category,
+                details: incident.details,
+                locationLabel: incident.locationLabel,
+                latitude: incident.latitude,
+                longitude: incident.longitude,
+                urgency: incident.urgency,
+                status: incident.status,
+                createdAt: incident.createdAt,
+                updatedAt: incident.updatedAt,
+                respondersCount: shaped.respondersCount,
+            };
+        }
+
+        return buildResponderFacingIncident(incident, incident.responders, requesterId);
     },
 
     async updateMyResponderStatus(

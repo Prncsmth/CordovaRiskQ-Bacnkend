@@ -10,7 +10,7 @@ export const incidentController = {
     }),
 
     list: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const incidents = await incidentService.list();
+        const incidents = await incidentService.list(req.userId!);
         res.status(200).json({ success: true, incidents });
     }),
 
