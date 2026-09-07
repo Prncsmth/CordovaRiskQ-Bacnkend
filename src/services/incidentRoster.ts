@@ -21,6 +21,13 @@ export function isActiveStatus(status: ResponderRosterStatus): boolean {
 // Allowed (currentStatus | null) -> targetStatus transitions for a single
 // responder's own IncidentResponder row. `null` currentStatus means the
 // responder has no row yet for this incident.
+//
+// Asymmetry note: on_the_way/arrived allow a same-status resubmission as a
+// harmless idempotent no-op, since their frontend callers (Head Out / Arrive)
+// have no double-tap guard. By contrast, joined intentionally does NOT allow
+// joined->joined, because its caller (Join) DOES guard against double-submission
+// client-side and treats a racing double-submit as a real 409 error that the UI
+// can gracefully absorb.
 export function isRosterTransitionAllowed(
     currentStatus: ResponderRosterStatus | null,
     targetStatus: ResponderRosterStatus,
@@ -67,7 +74,7 @@ export function pickAcceptedByResponderId(
     const active = rows.filter((r) => isActiveStatus(r.status));
     if (active.length === 0) return null;
 
-    const earliest = [...active].sort((a, b) => {
+    const earliest = active.sort((a, b) => {
         const diff = a.createdAt.getTime() - b.createdAt.getTime();
         if (diff !== 0) return diff;
         return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;

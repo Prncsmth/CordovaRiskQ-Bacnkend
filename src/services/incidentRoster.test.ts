@@ -46,6 +46,26 @@ test("isRosterTransitionAllowed: leaving requires an active row", () => {
     assert.equal(isRosterTransitionAllowed("declined", "left"), false);
 });
 
+test("isRosterTransitionAllowed: comprehensive cell coverage for on_the_way state", () => {
+    assert.equal(isRosterTransitionAllowed("on_the_way", "on_the_way"), true); // idempotent no-op
+    assert.equal(isRosterTransitionAllowed("on_the_way", "joined"), false); // can't regress to joined
+    assert.equal(isRosterTransitionAllowed("on_the_way", "declined"), false); // can't decline while active
+    assert.equal(isRosterTransitionAllowed("left", "on_the_way"), false); // can't resume on_the_way after leaving
+    assert.equal(isRosterTransitionAllowed("declined", "on_the_way"), false); // can't resume on_the_way after declining
+});
+
+test("isRosterTransitionAllowed: comprehensive cell coverage for arrived state", () => {
+    assert.equal(isRosterTransitionAllowed("arrived", "arrived"), true); // idempotent no-op
+    assert.equal(isRosterTransitionAllowed("arrived", "joined"), false); // can't regress to joined
+    assert.equal(isRosterTransitionAllowed("arrived", "declined"), false); // can't decline while active
+    assert.equal(isRosterTransitionAllowed(null, "arrived"), false); // can't skip straight to arrived
+    assert.equal(isRosterTransitionAllowed("left", "arrived"), false); // can't skip on_the_way when resuming
+});
+
+test("isRosterTransitionAllowed: comprehensive cell coverage for left state", () => {
+    assert.equal(isRosterTransitionAllowed("left", "left"), false); // can't transition from left->left
+});
+
 test("deriveIncidentStatus picks the highest-progress active status", () => {
     assert.equal(deriveIncidentStatus([]), "pending");
     assert.equal(deriveIncidentStatus(["joined"]), "lobby");
