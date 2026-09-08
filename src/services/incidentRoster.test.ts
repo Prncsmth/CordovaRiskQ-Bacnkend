@@ -5,6 +5,7 @@ import {
     deriveIncidentStatus,
     isActiveStatus,
     isRosterTransitionAllowed,
+    otherActiveResponderIds,
     pickAcceptedByResponderId,
 } from "@/services/incidentRoster";
 
@@ -88,6 +89,27 @@ test("pickAcceptedByResponderId returns null when nobody is active", () => {
         { id: "r2", responderId: "bob", status: "left", createdAt: new Date("2026-01-02T00:00:00Z") },
     ]);
     assert.equal(result, null);
+});
+
+test("otherActiveResponderIds excludes the actor and any inactive rows", () => {
+    const result = otherActiveResponderIds(
+        [
+            { responderId: "alice", status: "joined" },
+            { responderId: "bob", status: "on_the_way" },
+            { responderId: "carol", status: "declined" },
+            { responderId: "dave", status: "left" },
+        ],
+        "alice",
+    );
+    assert.deepEqual(result, ["bob"]);
+});
+
+test("otherActiveResponderIds returns empty when the actor is the only active responder", () => {
+    const result = otherActiveResponderIds(
+        [{ responderId: "alice", status: "joined" }],
+        "alice",
+    );
+    assert.deepEqual(result, []);
 });
 
 test("pickAcceptedByResponderId breaks an exact createdAt tie by id", () => {

@@ -64,6 +64,19 @@ export function deriveIncidentStatus(
     return "pending";
 }
 
+// The other responders who should hear about one responder's roster action
+// (join/advance/leave) on this incident -- every currently-active row except
+// the actor's own. Used to fan out a "roster_update" notification to
+// teammates without notifying the actor about their own action.
+export function otherActiveResponderIds(
+    rows: { responderId: string; status: ResponderRosterStatus }[],
+    excludingResponderId: string,
+): string[] {
+    return rows
+        .filter((r) => isActiveStatus(r.status) && r.responderId !== excludingResponderId)
+        .map((r) => r.responderId);
+}
+
 // Picks the acceptedByResponderId-shaped value for backward compatibility
 // with the Admin repo: the responder with the earliest createdAt among
 // active-only rows (never left/declined), id as a deterministic tiebreaker

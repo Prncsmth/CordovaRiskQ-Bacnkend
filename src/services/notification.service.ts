@@ -12,7 +12,7 @@ type ExpoPushTicket = {
 };
 
 type NotificationData = {
-    type: "announcement" | "incident_status" | "tide_risk";
+    type: "announcement" | "incident_status" | "tide_risk" | "new_incident" | "roster_update";
     title: string;
     body: string;
     referenceId?: string;
@@ -135,6 +135,23 @@ export const notificationService = {
             );
         } catch (error) {
             console.error("Failed to create notifications for all citizens:", error);
+        }
+    },
+
+    // Mirrors createForAllCitizens, for fanning a new-incident alert out to
+    // every responder account.
+    async createForAllResponders(data: NotificationData) {
+        try {
+            const responders = await prisma.user.findMany({
+                where: { role: "responder" },
+                select: { id: true },
+            });
+            await this.createForUsers(
+                responders.map((r) => r.id),
+                data
+            );
+        } catch (error) {
+            console.error("Failed to create notifications for all responders:", error);
         }
     },
 };

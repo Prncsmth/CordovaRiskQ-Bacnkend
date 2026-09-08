@@ -5,6 +5,7 @@ import {
     deriveIncidentStatus,
     isActiveStatus,
     isRosterTransitionAllowed,
+    otherActiveResponderIds,
     pickAcceptedByResponderId,
     type ResponderRosterStatus,
 } from "@/services/incidentRoster";
@@ -50,6 +51,64 @@ async function notifyStatusChange(
         type: "incident_status",
         title: copy.title,
         body: copy.body,
+        referenceId: incidentId,
+    });
+}
+
+// Copy shown to a responder's teammates (never the actor) when the actor's
+// own roster row changes on an incident they're already helping with.
+// "declined" is intentionally absent: a decline never leaves any prior row
+// for anyone else to have seen the responder join in the first place, so it
+// has nobody to notify.
+const ROSTER_NOTIFICATION_COPY: Partial<
+    Record<ResponderRosterStatus, (name: string) => { title: string; body: string }>
+> = {
+    joined: (name) => ({ title: "Responder joined", body: `${name} joined this incident.` }),
+    on_the_way: (name) => ({ title: "Responder en route", body: `${name} is on the way.` }),
+    arrived: (name) => ({ title: "Responder arrived", body: `${name} arrived on scene.` }),
+    left: (name) => ({ title: "Responder left", body: `${name} left this incident.` }),
+};
+
+const CLOSED_INCIDENT_NOTIFICATION_COPY: Record<"completed" | "cancelled", { title: string; body: string }> = {
+    completed: { title: "Incident completed", body: "This incident has been marked completed." },
+    cancelled: { title: "Incident cancelled", body: "This incident has been cancelled." },
+};
+
+async function notifyTeammatesOfRosterChange(
+    incidentId: string,
+    actorId: string,
+    actorName: string,
+    targetStatus: ResponderRosterStatus,
+    allRows: { responderId: string; status: string }[],
+) {
+    const copy = ROSTER_NOTIFICATION_COPY[targetStatus];
+    if (!copy) return;
+    const recipients = otherActiveResponderIds(
+        allRows.map((r) => ({ responderId: r.responderId, status: r.status as ResponderRosterStatus })),
+        actorId,
+    );
+    if (recipients.length === 0) return;
+    await notificationService.createForUsers(recipients, {
+        type: "roster_update",
+        ...copy(actorName),
+        referenceId: incidentId,
+    });
+}
+
+async function notifyTeammatesOfClosure(
+    incidentId: string,
+    actorId: string,
+    status: "completed" | "cancelled",
+    allRows: { responderId: string; status: string }[],
+) {
+    const recipients = otherActiveResponderIds(
+        allRows.map((r) => ({ responderId: r.responderId, status: r.status as ResponderRosterStatus })),
+        actorId,
+    );
+    if (recipients.length === 0) return;
+    await notificationService.createForUsers(recipients, {
+        type: "roster_update",
+        ...CLOSED_INCIDENT_NOTIFICATION_COPY[status],
         referenceId: incidentId,
     });
 }
@@ -136,7 +195,7 @@ export const incidentService = {
             longitude: number;
         }
     ) {
-        return prisma.incident.create({
+        const incident = await prisma.incident.create({
             data: {
                 source: "report",
                 reporterId,
@@ -148,6 +207,13 @@ export const incidentService = {
                 urgency: URGENCY_BY_CATEGORY[data.category] ?? "low",
             },
         });
+        await notificationService.createForAllResponders({
+            type: "new_incident",
+            title: "New incident reported",
+            body: `A ${data.category} incident was reported near ${data.locationLabel}.`,
+            referenceId: incident.id,
+        });
+        return incident;
     },
 
     async createFromSos(
@@ -155,7 +221,7 @@ export const incidentService = {
         sosAlertId: string,
         data: { latitude?: number; longitude?: number }
     ) {
-        return prisma.incident.create({
+        const incident = await prisma.incident.create({
             data: {
                 source: "sos",
                 reporterId,
@@ -167,6 +233,13 @@ export const incidentService = {
                 urgency: "high",
             },
         });
+        await notificationService.createForAllResponders({
+            type: "new_incident",
+            title: "SOS alert",
+            body: "An SOS alert was triggered nearby.",
+            referenceId: incident.id,
+        });
+        return incident;
     },
 
     async list(responderId: string) {
@@ -276,6 +349,9 @@ export const incidentService = {
             );
         }
 
+        const actorName = allRows.find((r) => r.responderId === responderId)?.responder.name ?? "A responder";
+        await notifyTeammatesOfRosterChange(id, responderId, actorName, targetStatus, allRows);
+
         return buildResponderFacingIncident(updatedIncident, allRows, responderId);
     },
 
@@ -292,9 +368,10 @@ export const incidentService = {
 
         // No-op a retried/duplicate PATCH that doesn't actually change the
         // status -- avoids re-updating updatedAt and re-notifying the
-        // reporter for a status they were already notified about.
+        // reporter/teammates for a status they were already notified about.
+        const statusChanged = incident.status !== status;
         let updatedIncident = incident;
-        if (incident.status !== status) {
+        if (statusChanged) {
             updatedIncident = await prisma.incident.update({
                 where: { id },
                 data: { status },
@@ -311,6 +388,11 @@ export const incidentService = {
             where: { incidentId: id },
             include: { responder: { select: { name: true } } },
         });
+
+        if (statusChanged) {
+            await notifyTeammatesOfClosure(id, responderId, status, allRows);
+        }
+
         return buildResponderFacingIncident(updatedIncident, allRows, responderId);
     },
 };
