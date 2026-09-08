@@ -6,6 +6,7 @@ import {
     updateProfileSchema,
     changePasswordSchema,
     updatePushTokenSchema,
+    updateDutyStatusSchema,
 } from "@/validations/user.validation";
 
 const router = Router();
@@ -28,6 +29,12 @@ router.patch(
     authenticate,
     validate(updatePushTokenSchema),
     userController.updatePushToken
+);
+router.patch(
+    "/users/duty-status",
+    authenticate,
+    validate(updateDutyStatusSchema),
+    userController.updateDutyStatus
 );
 
 export default router;

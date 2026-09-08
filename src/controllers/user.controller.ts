@@ -23,4 +23,9 @@ export const userController = {
         await userService.updatePushToken(req.userId!, req.body.token);
         res.status(200).json({ success: true });
     }),
+
+    updateDutyStatus: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        await userService.updateDutyStatus(req.userId!, req.body.isOnDuty);
+        res.status(200).json({ success: true });
+    }),
 };

@@ -139,11 +139,12 @@ export const notificationService = {
     },
 
     // Mirrors createForAllCitizens, for fanning a new-incident alert out to
-    // every responder account.
+    // every on-duty responder account. Off-duty responders are excluded --
+    // going offline is meaningless if it doesn't stop new-incident pages.
     async createForAllResponders(data: NotificationData) {
         try {
             const responders = await prisma.user.findMany({
-                where: { role: "responder" },
+                where: { role: "responder", isOnDuty: true },
                 select: { id: true },
             });
             await this.createForUsers(

@@ -14,3 +14,7 @@ export const changePasswordSchema = z.object({
 export const updatePushTokenSchema = z.object({
     token: z.string().min(1, "Push token is required"),
 });
+
+export const updateDutyStatusSchema = z.object({
+    isOnDuty: z.boolean(),
+});

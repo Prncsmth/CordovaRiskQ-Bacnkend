@@ -81,4 +81,11 @@ export const userService = {
             data: { pushToken: token },
         });
     },
+
+    async updateDutyStatus(userId: string, isOnDuty: boolean) {
+        await prisma.user.update({
+            where: { id: userId },
+            data: { isOnDuty },
+        });
+    },
 };

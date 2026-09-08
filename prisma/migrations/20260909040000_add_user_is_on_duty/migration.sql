@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "User" ADD COLUMN "isOnDuty" BOOLEAN NOT NULL DEFAULT true;
