@@ -8,6 +8,7 @@ import {
     pickAcceptedByResponderId,
     type ResponderRosterStatus,
 } from "@/services/incidentRoster";
+import { canViewIncident } from "@/services/incidentAuthorization";
 
 const URGENCY_BY_CATEGORY: Record<string, string> = {
     fire: "high",
@@ -205,7 +206,7 @@ export const incidentService = {
         if (!incident) throw new AppError("Incident not found", 404);
 
         const requester = await prisma.user.findUnique({ where: { id: requesterId } });
-        if (requester?.role === "citizen" && incident.reporterId !== requesterId) {
+        if (!canViewIncident(requester?.role, incident.reporterId, requesterId)) {
             throw new AppError("Not your report", 403);
         }
 
