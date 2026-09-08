@@ -41,25 +41,31 @@ export function initRealtime(httpServer: HttpServer): void {
 
     io.on("connection", (socket: AuthenticatedSocket) => {
         socket.on("join:incident", async (data: { incidentId?: string }) => {
-            const incidentId = data?.incidentId;
-            if (!socket.userId || typeof incidentId !== "string") {
-                socket.emit("error", { message: "Cannot join this incident" });
-                return;
-            }
+            const refuse = () => socket.emit("error", { message: "Cannot join this incident" });
+            try {
+                const incidentId = data?.incidentId;
+                if (!socket.userId || typeof incidentId !== "string") {
+                    refuse();
+                    return;
+                }
 
-            const incident = await prisma.incident.findUnique({ where: { id: incidentId } });
-            if (!incident) {
-                socket.emit("error", { message: "Cannot join this incident" });
-                return;
-            }
+                const [incident, requester] = await Promise.all([
+                    prisma.incident.findUnique({ where: { id: incidentId } }),
+                    prisma.user.findUnique({ where: { id: socket.userId } }),
+                ]);
+                if (!incident) {
+                    refuse();
+                    return;
+                }
+                if (!canViewIncident(requester?.role, incident.reporterId, socket.userId)) {
+                    refuse();
+                    return;
+                }
 
-            const requester = await prisma.user.findUnique({ where: { id: socket.userId } });
-            if (!canViewIncident(requester?.role, incident.reporterId, socket.userId)) {
-                socket.emit("error", { message: "Cannot join this incident" });
-                return;
+                socket.join(`incident:${incidentId}`);
+            } catch {
+                refuse();
             }
-
-            socket.join(`incident:${incidentId}`);
         });
     });
 
