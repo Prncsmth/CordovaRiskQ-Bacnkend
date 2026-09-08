@@ -2,6 +2,7 @@ import { Response } from "express";
 import { AuthenticatedRequest } from "@/middlewares/authenticate.middleware";
 import { incidentService } from "@/services/incident.service";
 import { asyncHandler } from "@/utils/asyncHandler";
+import { emitIncidentUpdate } from "@/realtime/emit";
 
 export const incidentController = {
     create: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
@@ -30,6 +31,14 @@ export const incidentController = {
             req.userId!,
             req.body.status,
         );
+        emitIncidentUpdate(incident.id, {
+            id: incident.id,
+            status: incident.status,
+            responders: incident.responders,
+            respondersCount: incident.respondersCount,
+            acceptedByResponderId: incident.acceptedByResponderId,
+            updatedAt: incident.updatedAt.toISOString(),
+        });
         res.status(200).json({ success: true, incident });
     }),
 
@@ -39,6 +48,14 @@ export const incidentController = {
             req.userId!,
             req.body.status
         );
+        emitIncidentUpdate(incident.id, {
+            id: incident.id,
+            status: incident.status,
+            responders: incident.responders,
+            respondersCount: incident.respondersCount,
+            acceptedByResponderId: incident.acceptedByResponderId,
+            updatedAt: incident.updatedAt.toISOString(),
+        });
         res.status(200).json({ success: true, incident });
     }),
 };
