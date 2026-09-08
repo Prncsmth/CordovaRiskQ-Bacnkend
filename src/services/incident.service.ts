@@ -395,4 +395,32 @@ export const incidentService = {
 
         return buildResponderFacingIncident(updatedIncident, allRows, responderId);
     },
+
+    async ringTeam(id: string, responderId: string) {
+        const incident = await prisma.incident.findUnique({ where: { id } });
+        if (!incident) throw new AppError("Incident not found", 404);
+
+        const allRows = await prisma.incidentResponder.findMany({
+            where: { incidentId: id },
+            include: { responder: { select: { name: true } } },
+        });
+
+        const myRow = allRows.find((r) => r.responderId === responderId);
+        if (!myRow || !isActiveStatus(myRow.status as ResponderRosterStatus)) {
+            throw new AppError("You must be helping this incident to ring the team", 403);
+        }
+
+        const recipients = otherActiveResponderIds(
+            allRows.map((r) => ({ responderId: r.responderId, status: r.status as ResponderRosterStatus })),
+            responderId,
+        );
+        if (recipients.length === 0) return;
+
+        await notificationService.createForUsers(recipients, {
+            type: "team_ring",
+            title: "Team ring",
+            body: `${myRow.responder.name ?? "A responder"} is calling for backup on this incident.`,
+            referenceId: id,
+        });
+    },
 };

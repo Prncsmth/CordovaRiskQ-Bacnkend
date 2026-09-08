@@ -31,5 +31,10 @@ router.patch(
     validate(updateIncidentStatusSchema),
     incidentController.updateStatus
 );
+router.post(
+    "/incidents/:id/ring",
+    authenticate,
+    incidentController.ringTeam
+);
 
 export default router;

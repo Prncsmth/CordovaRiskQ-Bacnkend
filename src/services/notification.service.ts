@@ -12,7 +12,13 @@ type ExpoPushTicket = {
 };
 
 type NotificationData = {
-    type: "announcement" | "incident_status" | "tide_risk" | "new_incident" | "roster_update";
+    type:
+        | "announcement"
+        | "incident_status"
+        | "tide_risk"
+        | "new_incident"
+        | "roster_update"
+        | "team_ring";
     title: string;
     body: string;
     referenceId?: string;

@@ -58,4 +58,9 @@ export const incidentController = {
         });
         res.status(200).json({ success: true, incident });
     }),
+
+    ringTeam: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        await incidentService.ringTeam(req.params.id as string, req.userId!);
+        res.status(200).json({ success: true });
+    }),
 };
