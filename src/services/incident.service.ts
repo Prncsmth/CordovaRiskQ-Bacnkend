@@ -219,7 +219,7 @@ export const incidentService = {
     async createFromSos(
         reporterId: string,
         sosAlertId: string,
-        data: { latitude?: number; longitude?: number }
+        data: { latitude?: number; longitude?: number; locationLabel?: string }
     ) {
         const incident = await prisma.incident.create({
             data: {
@@ -227,7 +227,11 @@ export const incidentService = {
                 reporterId,
                 sosAlertId,
                 category: "sos",
-                locationLabel: "SOS Alert",
+                // Falls back to the old placeholder only when no location was
+                // available at trigger time (e.g. permission denied) -- the
+                // frontend computes a real nearest-barangay label whenever it
+                // has device coordinates, same as the citizen report flow.
+                locationLabel: data.locationLabel ?? "SOS Alert",
                 latitude: data.latitude,
                 longitude: data.longitude,
                 urgency: "high",

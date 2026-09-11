@@ -4,7 +4,7 @@ import { incidentService } from "@/services/incident.service";
 export const sosService = {
     async trigger(
         userId: string,
-        data: { latitude?: number; longitude?: number }
+        data: { latitude?: number; longitude?: number; locationLabel?: string }
     ) {
         const alert = await prisma.sosAlert.create({
             data: {
