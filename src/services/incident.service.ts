@@ -275,6 +275,16 @@ export const incidentService = {
         });
     },
 
+    async listCompletedByResponder(responderId: string) {
+        return prisma.incident.findMany({
+            where: {
+                status: "completed",
+                responders: { some: { responderId, status: { not: "declined" } } },
+            },
+            orderBy: { updatedAt: "desc" },
+        });
+    },
+
     async getById(id: string, requesterId: string) {
         const incident = await prisma.incident.findUnique({
             where: { id },
