@@ -6,6 +6,8 @@ export const createIncidentSchema = z.object({
     locationLabel: z.string().min(1, "Location is required"),
     latitude: z.number(),
     longitude: z.number(),
+    reporterLatitude: z.number(),
+    reporterLongitude: z.number(),
 });
 
 export const updateIncidentStatusSchema = z.object({

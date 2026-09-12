@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { sosController } from "@/controllers/sos.controller";
 import { authenticate } from "@/middlewares/authenticate.middleware";
+import { requireSosInsideCordova } from "@/middlewares/geofence.middleware";
 import { validate } from "@/middlewares/validate.middleware";
 import { triggerSosSchema } from "@/validations/sos.validation";
 
@@ -10,6 +11,7 @@ router.post(
     "/sos",
     authenticate,
     validate(triggerSosSchema),
+    requireSosInsideCordova,
     sosController.trigger
 );
 

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { incidentController } from "@/controllers/incident.controller";
 import { authenticate } from "@/middlewares/authenticate.middleware";
+import { requireIncidentInsideCordova } from "@/middlewares/geofence.middleware";
 import { validate } from "@/middlewares/validate.middleware";
 import {
     createIncidentSchema,
@@ -14,6 +15,7 @@ router.post(
     "/incidents",
     authenticate,
     validate(createIncidentSchema),
+    requireIncidentInsideCordova,
     incidentController.create
 );
 router.get("/incidents", authenticate, incidentController.list);
