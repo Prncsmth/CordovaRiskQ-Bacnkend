@@ -9,7 +9,7 @@ import {
     pickAcceptedByResponderId,
     type ResponderRosterStatus,
 } from "@/services/incidentRoster";
-import { canViewIncident } from "@/services/incidentAuthorization";
+import { canCancelIncident, canViewIncident } from "@/services/incidentAuthorization";
 
 const URGENCY_BY_CATEGORY: Record<string, string> = {
     fire: "high",
@@ -408,6 +408,35 @@ export const incidentService = {
         }
 
         return buildResponderFacingIncident(updatedIncident, allRows, responderId);
+    },
+
+    // Citizen-facing cancel -- the counterpart to updateStatus above, which
+    // is responder-only and gated on being "arrived". This one is gated the
+    // opposite way: only the original reporter, and only before anyone has
+    // joined (see canCancelIncident). No notification is sent since by
+    // definition no responder is assigned yet.
+    async cancelByReporter(id: string, reporterId: string) {
+        const incident = await prisma.incident.findUnique({ where: { id } });
+        if (!incident) throw new AppError("Incident not found", 404);
+
+        if (incident.reporterId !== reporterId) {
+            throw new AppError("Not your report", 403);
+        }
+        if (!canCancelIncident(incident.reporterId, reporterId, incident.status)) {
+            throw new AppError("This report can no longer be cancelled", 409);
+        }
+
+        const updatedIncident = await prisma.incident.update({
+            where: { id },
+            data: { status: "cancelled" },
+        });
+
+        const allRows = await prisma.incidentResponder.findMany({
+            where: { incidentId: id },
+            include: { responder: { select: { name: true } } },
+        });
+
+        return buildResponderFacingIncident(updatedIncident, allRows, reporterId);
     },
 
     async ringTeam(id: string, responderId: string) {

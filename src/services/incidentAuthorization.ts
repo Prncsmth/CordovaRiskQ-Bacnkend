@@ -13,3 +13,15 @@ export function canViewIncident(
     if (role === "citizen") return reporterId === requesterId;
     return true;
 }
+
+// A citizen can cancel their own report only while it's still "pending" --
+// once a responder has joined (any later status), someone is already acting
+// on it and a unilateral cancel would leave them dispatched with no signal.
+// See docs/superpowers/specs/2026-09-14-sos-cancel-confirmation-design.md.
+export function canCancelIncident(
+    reporterId: string,
+    requesterId: string,
+    status: string,
+): boolean {
+    return reporterId === requesterId && status === "pending";
+}

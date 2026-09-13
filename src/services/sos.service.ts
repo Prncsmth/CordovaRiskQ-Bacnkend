@@ -15,9 +15,13 @@ export const sosService = {
         });
 
         // Best-effort: the SOS record itself is the primary outcome and must
-        // still succeed even if this mirror write fails.
+        // still succeed even if this mirror write fails. incidentId stays
+        // null in that case -- the frontend just won't be able to offer a
+        // cancel action, since there's nothing to cancel.
+        let incidentId: string | null = null;
         try {
-            await incidentService.createFromSos(userId, alert.id, data);
+            const incident = await incidentService.createFromSos(userId, alert.id, data);
+            incidentId = incident.id;
         } catch (err) {
             console.error(
                 "Failed to create linked incident for SOS alert",
@@ -30,6 +34,7 @@ export const sosService = {
             id: alert.id,
             status: alert.status,
             createdAt: alert.createdAt,
+            incidentId,
         };
     },
 };
