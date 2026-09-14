@@ -64,6 +64,19 @@ export const incidentController = {
         res.status(200).json({ success: true, incident });
     }),
 
+    cancelByReporter: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        const incident = await incidentService.cancelByReporter(req.params.id as string, req.userId!);
+        emitIncidentUpdate(incident.id, {
+            id: incident.id,
+            status: incident.status,
+            responders: incident.responders,
+            respondersCount: incident.respondersCount,
+            acceptedByResponderId: incident.acceptedByResponderId,
+            updatedAt: incident.updatedAt.toISOString(),
+        });
+        res.status(200).json({ success: true });
+    }),
+
     ringTeam: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
         await incidentService.ringTeam(req.params.id as string, req.userId!);
         res.status(200).json({ success: true });

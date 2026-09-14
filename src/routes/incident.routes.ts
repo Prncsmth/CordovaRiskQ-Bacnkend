@@ -39,5 +39,10 @@ router.post(
     authenticate,
     incidentController.ringTeam
 );
+router.patch(
+    "/incidents/:id/cancel",
+    authenticate,
+    incidentController.cancelByReporter
+);
 
 export default router;
