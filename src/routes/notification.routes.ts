@@ -8,5 +8,6 @@ const router = Router();
 router.get("/notifications", authenticate, notificationController.list);
 router.patch("/notifications/:id/read", authenticate, notificationController.markRead);
 router.patch("/notifications/read-all", authenticate, notificationController.markAllRead);
+router.delete("/notifications/:id", authenticate, notificationController.remove);
 
 export default router;

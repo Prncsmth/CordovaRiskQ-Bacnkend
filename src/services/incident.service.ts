@@ -263,6 +263,7 @@ export const incidentService = {
                 ...incident,
                 acceptedByResponderId: shaped.acceptedByResponderId,
                 respondersCount: shaped.respondersCount,
+                responders: shaped.activeResponders,
                 myStatus: myRow?.status ?? "pending",
             };
         });

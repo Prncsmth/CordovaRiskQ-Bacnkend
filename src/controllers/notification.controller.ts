@@ -19,4 +19,9 @@ export const notificationController = {
         await notificationService.markAllRead(req.userId!);
         res.status(200).json({ success: true });
     }),
+
+    remove: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        await notificationService.remove(req.params.id as string, req.userId!);
+        res.status(200).json({ success: true });
+    }),
 };

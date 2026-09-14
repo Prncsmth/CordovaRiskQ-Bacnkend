@@ -21,6 +21,7 @@ model User {
   name               String?
   mobile             String?
   role               String     @default("citizen")
+  unit               String?    // responder org classification: "BDRRMO" | "MDRRMO" -- unset for non-responders
   pushToken          String?
   isOnDuty           Boolean    @default(true)
   createdAt          DateTime   @default(now())
