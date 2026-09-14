@@ -102,6 +102,14 @@ export const notificationService = {
         });
     },
 
+    async remove(id: string, userId: string) {
+        const existing = await prisma.notification.findUnique({ where: { id } });
+        if (!existing || existing.userId !== userId) {
+            throw new AppError("Notification not found", 404);
+        }
+        await prisma.notification.delete({ where: { id } });
+    },
+
     // Bulk-creates Notification rows then does a best-effort Expo push
     // send. Wrapped in one try/catch so a DB/network failure here can
     // never make an already-committed primary action (e.g. publishing an

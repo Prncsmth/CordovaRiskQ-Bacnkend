@@ -9,6 +9,7 @@ import adminAuthRoutes from "@/routes/admin-auth.routes";
 import tideRoutes from "@/routes/tide.routes";
 import announcementRoutes from "@/routes/announcement.routes";
 import notificationRoutes from "@/routes/notification.routes";
+import historyRoutes from "@/routes/history.routes";
 
 // Central router — mount all feature route files here.
 // As you add new resources, do: router.use(entityRoutes) below.
@@ -24,6 +25,7 @@ router.use(adminAuthRoutes);
 router.use(tideRoutes);
 router.use(announcementRoutes);
 router.use(notificationRoutes);
+router.use(historyRoutes);
 
 export default router;
 
