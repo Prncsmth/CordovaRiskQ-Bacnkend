@@ -8,6 +8,8 @@ import { updateUserRoleSchema } from "@/validations/admin.validation";
 const router = Router();
 
 router.get("/admin/users", authenticate, requireAdmin, adminController.listUsers);
+router.get("/admin/users/names", authenticate, requireAdmin, adminController.listUserNames);
+router.get("/admin/users/:id", authenticate, requireAdmin, adminController.getUserById);
 router.patch(
     "/admin/users/:id/role",
     authenticate,

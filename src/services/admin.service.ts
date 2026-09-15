@@ -62,6 +62,31 @@ export const adminService = {
         };
     },
 
+    async getUserById(id: string) {
+        const user = await prisma.user.findUnique({ where: { id } });
+        if (!user) throw new AppError("User not found", 404);
+
+        return {
+            id: user.id,
+            name: user.name,
+            email: user.email,
+            mobile: user.mobile,
+            role: user.role,
+            unit: user.unit,
+            isOnDuty: user.isOnDuty,
+            createdAt: user.createdAt,
+        };
+    },
+
+    async listUserNames() {
+        const users = await prisma.user.findMany({
+            select: { id: true, name: true, email: true },
+            orderBy: { createdAt: "desc" },
+        });
+
+        return users.map((user) => ({ id: user.id, name: user.name ?? user.email }));
+    },
+
     async updateUserRole(targetUserId: string, role: string, unit?: string | null) {
         const target = await prisma.user.findUnique({ where: { id: targetUserId } });
         if (!target) throw new AppError("User not found", 404);

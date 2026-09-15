@@ -24,6 +24,16 @@ export const adminController = {
         res.status(200).json({ success: true, ...result });
     }),
 
+    getUserById: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        const user = await adminService.getUserById(req.params.id as string);
+        res.status(200).json({ success: true, user });
+    }),
+
+    listUserNames: asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
+        const users = await adminService.listUserNames();
+        res.status(200).json({ success: true, users });
+    }),
+
     updateUserRole: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
         const user = await adminService.updateUserRole(req.params.id as string, req.body.role, req.body.unit);
         res.status(200).json({ success: true, user });
