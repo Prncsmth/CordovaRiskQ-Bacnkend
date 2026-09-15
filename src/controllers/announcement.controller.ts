@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import { AuthenticatedRequest } from "@/middlewares/authenticate.middleware";
 import { announcementService } from "@/services/announcement.service";
 import { asyncHandler } from "@/utils/asyncHandler";
+import { queryInt, queryString } from "@/utils/queryParams";
 
 export const announcementController = {
     getActive: asyncHandler(async (req: Request, res: Response) => {
@@ -10,9 +11,14 @@ export const announcementController = {
         res.status(200).json({ success: true, announcement });
     }),
 
-    listForAdmin: asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
-        const announcements = await announcementService.listForAdmin();
-        res.status(200).json({ success: true, announcements });
+    listForAdmin: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        const result = await announcementService.listForAdmin({
+            search: queryString(req.query.search),
+            priority: queryString(req.query.priority),
+            page: queryInt(req.query.page),
+            limit: queryInt(req.query.limit),
+        });
+        res.status(200).json({ success: true, ...result });
     }),
 
     create: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {

@@ -2,22 +2,64 @@ import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
 import { mergeRecentActivity, type AdminActivityItem } from "@/services/adminActivity";
 
-export const adminService = {
-    async listUsers() {
-        const users = await prisma.user.findMany({
-            orderBy: { createdAt: "desc" },
-        });
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
-        return users.map((user) => ({
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            mobile: user.mobile,
-            role: user.role,
-            unit: user.unit,
-            isOnDuty: user.isOnDuty,
-            createdAt: user.createdAt,
-        }));
+export const adminService = {
+    async listUsers(filters: {
+        search?: string;
+        role?: string;
+        duty?: boolean;
+        unit?: string;
+        page?: number;
+        limit?: number;
+    }) {
+        const page = filters.page && filters.page > 0 ? Math.floor(filters.page) : 1;
+        const limit =
+            filters.limit && filters.limit > 0 ? Math.min(Math.floor(filters.limit), 100) : 20;
+
+        const where = {
+            ...(filters.role ? { role: filters.role } : {}),
+            ...(filters.duty !== undefined ? { isOnDuty: filters.duty } : {}),
+            ...(filters.unit ? { unit: filters.unit } : {}),
+            ...(filters.search
+                ? {
+                      OR: [
+                          { name: { contains: filters.search, mode: "insensitive" as const } },
+                          { email: { contains: filters.search, mode: "insensitive" as const } },
+                      ],
+                  }
+                : {}),
+        };
+
+        const [total, newThisWeek, users] = await Promise.all([
+            prisma.user.count({ where }),
+            prisma.user.count({
+                where: { ...where, createdAt: { gte: new Date(Date.now() - ONE_WEEK_MS) } },
+            }),
+            prisma.user.findMany({
+                where,
+                orderBy: { createdAt: "desc" },
+                skip: (page - 1) * limit,
+                take: limit,
+            }),
+        ]);
+
+        return {
+            users: users.map((user) => ({
+                id: user.id,
+                name: user.name,
+                email: user.email,
+                mobile: user.mobile,
+                role: user.role,
+                unit: user.unit,
+                isOnDuty: user.isOnDuty,
+                createdAt: user.createdAt,
+            })),
+            total,
+            newThisWeek,
+            page,
+            limit,
+        };
     },
 
     async updateUserRole(targetUserId: string, role: string, unit?: string | null) {

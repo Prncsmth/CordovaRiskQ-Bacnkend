@@ -19,11 +19,39 @@ export const announcementService = {
         });
     },
 
-    async listForAdmin() {
-        return prisma.announcement.findMany({
-            orderBy: { createdAt: "desc" },
-            take: 50,
-        });
+    async listForAdmin(filters: {
+        search?: string;
+        priority?: string;
+        page?: number;
+        limit?: number;
+    }) {
+        const page = filters.page && filters.page > 0 ? Math.floor(filters.page) : 1;
+        const limit =
+            filters.limit && filters.limit > 0 ? Math.min(Math.floor(filters.limit), 100) : 20;
+
+        const where = {
+            ...(filters.priority ? { priority: filters.priority } : {}),
+            ...(filters.search
+                ? {
+                      OR: [
+                          { title: { contains: filters.search, mode: "insensitive" as const } },
+                          { content: { contains: filters.search, mode: "insensitive" as const } },
+                      ],
+                  }
+                : {}),
+        };
+
+        const [total, announcements] = await Promise.all([
+            prisma.announcement.count({ where }),
+            prisma.announcement.findMany({
+                where,
+                orderBy: { createdAt: "desc" },
+                skip: (page - 1) * limit,
+                take: limit,
+            }),
+        ]);
+
+        return { announcements, total, page, limit };
     },
 
     async create(
