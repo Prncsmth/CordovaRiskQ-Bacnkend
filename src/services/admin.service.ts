@@ -20,7 +20,11 @@ export const adminService = {
         const where = {
             ...(filters.role ? { role: filters.role } : {}),
             ...(filters.duty !== undefined ? { isOnDuty: filters.duty } : {}),
-            ...(filters.unit ? { unit: filters.unit } : {}),
+            ...(filters.unit === "unclassified"
+                ? { unit: null }
+                : filters.unit
+                  ? { unit: filters.unit }
+                  : {}),
             ...(filters.search
                 ? {
                       OR: [
