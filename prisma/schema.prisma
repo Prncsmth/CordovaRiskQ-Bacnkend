@@ -122,3 +122,16 @@ model Notification {
 
   @@index([userId, createdAt])
 }
+
+model EvacuationCenter {
+  id         String   @id
+  name       String
+  address    String
+  category   String   // "school" | "evacuation_center"
+  facilities String[] // "Water" | "Power" | "Medical Aid" | "Restrooms"
+  latitude   Float
+  longitude  Float
+  status     String   @default("open") // "open" | "full", admin-toggled
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
