@@ -18,4 +18,9 @@ export const adminController = {
         const summary = await adminService.getResponderSummary();
         res.status(200).json({ success: true, summary });
     }),
+
+    getRecentActivity: asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
+        const activities = await adminService.getRecentActivity();
+        res.status(200).json({ success: true, activities });
+    }),
 };

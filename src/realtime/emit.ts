@@ -4,6 +4,7 @@
 // don't need to import the socket server directly. See
 // docs/superpowers/specs/2026-09-08-active-incident-realtime-design.md.
 import type { Server } from "socket.io";
+import type { AdminActivityItem } from "@/services/adminActivity";
 
 let ioInstance: Server | null = null;
 
@@ -26,4 +27,12 @@ export interface IncidentBroadcastPayload {
 
 export function emitIncidentUpdate(incidentId: string, payload: IncidentBroadcastPayload): void {
     ioInstance?.to(`incident:${incidentId}`).emit("incident:updated", payload);
+}
+
+// Pushed to every connected admin socket (see socket.ts's "admin" room join)
+// so the dashboard's Recent Activity widget updates live. The REST
+// counterpart (GET /admin/activity, adminService.getRecentActivity) supplies
+// the initial load; this covers everything that happens afterward.
+export function emitAdminActivity(activity: AdminActivityItem): void {
+    ioInstance?.to("admin").emit("admin:activity", activity);
 }

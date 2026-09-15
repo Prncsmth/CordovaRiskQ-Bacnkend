@@ -10,6 +10,7 @@ import {
     type ResponderRosterStatus,
 } from "@/services/incidentRoster";
 import { canCancelIncident, canViewIncident } from "@/services/incidentAuthorization";
+import { emitAdminActivity } from "@/realtime/emit";
 
 const URGENCY_BY_CATEGORY: Record<string, string> = {
     fire: "high",
@@ -367,6 +368,15 @@ export const incidentService = {
         const actorName = allRows.find((r) => r.responderId === responderId)?.responder.name ?? "A responder";
         await notifyTeammatesOfRosterChange(id, responderId, actorName, targetStatus, allRows);
 
+        if (targetStatus === "joined") {
+            emitAdminActivity({
+                type: "responder_joined",
+                title: `${actorName} joined an incident`,
+                detail: incident.locationLabel,
+                occurredAt: new Date().toISOString(),
+            });
+        }
+
         return buildResponderFacingIncident(updatedIncident, allRows, responderId);
     },
 
@@ -397,6 +407,14 @@ export const incidentService = {
                 updatedIncident.status,
                 updatedIncident.source,
             );
+            if (status === "completed") {
+                emitAdminActivity({
+                    type: "incident_resolved",
+                    title: "Incident resolved",
+                    detail: updatedIncident.locationLabel,
+                    occurredAt: updatedIncident.updatedAt.toISOString(),
+                });
+            }
         }
 
         const allRows = await prisma.incidentResponder.findMany({

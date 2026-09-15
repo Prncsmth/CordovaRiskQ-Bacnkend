@@ -40,6 +40,21 @@ export function initRealtime(httpServer: HttpServer): void {
     });
 
     io.on("connection", (socket: AuthenticatedSocket) => {
+        // Admin dashboard sockets auto-join a shared room so
+        // emitAdminActivity (see realtime/emit.ts) can push Recent Activity
+        // updates to every admin at once, the same way join:incident scopes
+        // incident updates to one incident's room below.
+        if (socket.userId) {
+            prisma.user
+                .findUnique({ where: { id: socket.userId }, select: { role: true } })
+                .then((user) => {
+                    if (user?.role === "admin") {
+                        socket.join("admin");
+                    }
+                })
+                .catch(() => {});
+        }
+
         socket.on("join:incident", async (data: { incidentId?: string }) => {
             const refuse = () => socket.emit("error", { message: "Cannot join this incident" });
             try {

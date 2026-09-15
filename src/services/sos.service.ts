@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { incidentService } from "@/services/incident.service";
+import { emitAdminActivity } from "@/realtime/emit";
 import { type AlertStatus, countAlertsByStatus, filterAlertIdsByStatus } from "@/services/sosAlertStatus";
 
 export type SosAlertAdminFilters = {
@@ -24,6 +25,13 @@ export const sosService = {
                 latitude: data.latitude,
                 longitude: data.longitude,
             },
+        });
+
+        emitAdminActivity({
+            type: "sos_alert",
+            title: "New SOS alert received",
+            detail: data.locationLabel ?? "Location unavailable",
+            occurredAt: alert.createdAt.toISOString(),
         });
 
         // Best-effort: the SOS record itself is the primary outcome and must

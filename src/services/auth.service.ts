@@ -3,6 +3,7 @@ import { OAuth2Client } from "google-auth-library";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
 import { signToken } from "@/utils/jwt";
+import { emitAdminActivity } from "@/realtime/emit";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
 
@@ -25,6 +26,13 @@ export const authService = {
         const hashedPassword = await bcrypt.hash(password, 10);
         const user = await prisma.user.create({
             data: { email: normalizedEmail, password: hashedPassword, name },
+        });
+
+        emitAdminActivity({
+            type: "user_registered",
+            title: "New user registered",
+            detail: user.name ?? user.email,
+            occurredAt: user.createdAt.toISOString(),
         });
 
         const token = signToken({ userId: user.id });
@@ -113,6 +121,12 @@ export const authService = {
                     data: { email: normalizedEmail, name, googleId },
                 });
                 isNewUser = true;
+                emitAdminActivity({
+                    type: "user_registered",
+                    title: "New user registered",
+                    detail: user.name ?? user.email,
+                    occurredAt: user.createdAt.toISOString(),
+                });
             }
         }
 
