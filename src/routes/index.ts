@@ -10,6 +10,7 @@ import tideRoutes from "@/routes/tide.routes";
 import announcementRoutes from "@/routes/announcement.routes";
 import notificationRoutes from "@/routes/notification.routes";
 import historyRoutes from "@/routes/history.routes";
+import evacuationCenterRoutes from "@/routes/evacuationCenter.routes";
 
 // Central router — mount all feature route files here.
 // As you add new resources, do: router.use(entityRoutes) below.
@@ -26,6 +27,7 @@ router.use(tideRoutes);
 router.use(announcementRoutes);
 router.use(notificationRoutes);
 router.use(historyRoutes);
+router.use(evacuationCenterRoutes);
 
 export default router;
 
