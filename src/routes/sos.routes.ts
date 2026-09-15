@@ -15,6 +15,7 @@ router.post(
     requireSosInsideCordova,
     sosController.trigger
 );
+router.get("/admin/sos-alerts/summary", authenticate, requireAdmin, sosController.getAdminSummary);
 router.get("/admin/sos-alerts", authenticate, requireAdmin, sosController.listForAdmin);
 
 export default router;

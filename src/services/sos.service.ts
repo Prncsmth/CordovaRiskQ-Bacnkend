@@ -1,9 +1,12 @@
 import { prisma } from "@/lib/prisma";
 import { incidentService } from "@/services/incident.service";
+import { type AlertStatus, countAlertsByStatus, filterAlertIdsByStatus } from "@/services/sosAlertStatus";
 
 export type SosAlertAdminFilters = {
     status?: string;
     barangay?: string;
+    search?: string;
+    alertStatus?: AlertStatus;
     startDate?: Date;
     endDate?: Date;
     page?: number;
@@ -65,14 +68,64 @@ export const sosService = {
                 select: { sosAlertId: true },
             });
             barangayAlertIds = matches.map((m) => m.sosAlertId as string);
-            if (barangayAlertIds.length === 0) {
+        }
+
+        let searchAlertIds: string[] | undefined;
+        if (filters.search) {
+            const [byName, byLocation] = await Promise.all([
+                prisma.sosAlert.findMany({
+                    where: { user: { name: { contains: filters.search, mode: "insensitive" } } },
+                    select: { id: true },
+                }),
+                prisma.incident.findMany({
+                    where: {
+                        sosAlertId: { not: null },
+                        locationLabel: { contains: filters.search, mode: "insensitive" },
+                    },
+                    select: { sosAlertId: true },
+                }),
+            ]);
+            searchAlertIds = Array.from(
+                new Set([...byName.map((a) => a.id), ...byLocation.map((i) => i.sosAlertId as string)]),
+            );
+        }
+
+        let statusAlertIds: string[] | undefined;
+        if (filters.alertStatus) {
+            const [allAlerts, linkedIncidents] = await Promise.all([
+                prisma.sosAlert.findMany({ select: { id: true } }),
+                prisma.incident.findMany({
+                    where: { sosAlertId: { not: null } },
+                    select: { sosAlertId: true, status: true },
+                }),
+            ]);
+            const incidentStatusByAlertId = new Map(
+                linkedIncidents.map((i) => [i.sosAlertId as string, i.status]),
+            );
+            statusAlertIds = filterAlertIdsByStatus(
+                allAlerts.map((a) => a.id),
+                incidentStatusByAlertId,
+                filters.alertStatus,
+            );
+        }
+
+        // Multiple id-based filters (barangay/search/alertStatus) must
+        // intersect (AND), not overwrite one another -- each narrows the
+        // candidate set further.
+        const idFilterSets = [barangayAlertIds, searchAlertIds, statusAlertIds].filter(
+            (s): s is string[] => s !== undefined,
+        );
+        let combinedIds: string[] | undefined;
+        if (idFilterSets.length > 0) {
+            combinedIds = idFilterSets.reduce((acc, ids) => acc.filter((id) => ids.includes(id)));
+            if (combinedIds.length === 0) {
                 return { alerts: [], total: 0, page, limit };
             }
         }
 
         const where = {
             ...(filters.status ? { status: filters.status } : {}),
-            ...(barangayAlertIds ? { id: { in: barangayAlertIds } } : {}),
+            ...(combinedIds ? { id: { in: combinedIds } } : {}),
             ...(filters.startDate || filters.endDate
                 ? { createdAt: { gte: filters.startDate, lte: filters.endDate } }
                 : {}),
@@ -114,5 +167,19 @@ export const sosService = {
             page,
             limit,
         };
+    },
+
+    async getAdminSummary() {
+        const [allAlerts, linkedIncidents] = await Promise.all([
+            prisma.sosAlert.findMany({ select: { id: true } }),
+            prisma.incident.findMany({
+                where: { sosAlertId: { not: null } },
+                select: { sosAlertId: true, status: true },
+            }),
+        ]);
+        const incidentStatusByAlertId = new Map(
+            linkedIncidents.map((i) => [i.sosAlertId as string, i.status]),
+        );
+        return countAlertsByStatus(allAlerts.map((a) => a.id), incidentStatusByAlertId);
     },
 };
