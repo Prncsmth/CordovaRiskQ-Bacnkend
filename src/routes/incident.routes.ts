@@ -44,5 +44,7 @@ router.patch(
     authenticate,
     incidentController.cancelByReporter
 );
+router.delete("/incidents/:id", authenticate, incidentController.removeOwnReport);
+router.get("/incidents/:id/tracking", authenticate, incidentController.getTracking);
 
 export default router;

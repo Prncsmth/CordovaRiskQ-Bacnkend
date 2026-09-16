@@ -458,6 +458,27 @@ export const incidentService = {
         return buildResponderFacingIncident(updatedIncident, allRows, reporterId);
     },
 
+    // Lets a reporter clear a closed report out of their own history. Only
+    // terminal (completed/cancelled) reports qualify -- an active one is
+    // cancelled via cancelByReporter above, never deleted outright, so
+    // responders already en route can't have the report vanish under them.
+    // IncidentResponder rows have no cascade rule on their incidentId FK, so
+    // they're cleared first in the same transaction.
+    async removeOwnReport(id: string, reporterId: string) {
+        const incident = await prisma.incident.findUnique({ where: { id } });
+        if (!incident || incident.reporterId !== reporterId) {
+            throw new AppError("Report not found", 404);
+        }
+        if (NON_TERMINAL_STATUSES.includes(incident.status)) {
+            throw new AppError("Only a completed or cancelled report can be deleted", 409);
+        }
+
+        await prisma.$transaction([
+            prisma.incidentResponder.deleteMany({ where: { incidentId: id } }),
+            prisma.incident.delete({ where: { id } }),
+        ]);
+    },
+
     async ringTeam(id: string, responderId: string) {
         const incident = await prisma.incident.findUnique({ where: { id } });
         if (!incident) throw new AppError("Incident not found", 404);

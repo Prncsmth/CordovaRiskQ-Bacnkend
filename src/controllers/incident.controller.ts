@@ -1,6 +1,7 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "@/middlewares/authenticate.middleware";
 import { incidentService } from "@/services/incident.service";
+import { trackingService } from "@/services/tracking.service";
 import { asyncHandler } from "@/utils/asyncHandler";
 import { emitIncidentUpdate } from "@/realtime/emit";
 
@@ -80,5 +81,15 @@ export const incidentController = {
     ringTeam: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
         await incidentService.ringTeam(req.params.id as string, req.userId!);
         res.status(200).json({ success: true });
+    }),
+
+    removeOwnReport: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        await incidentService.removeOwnReport(req.params.id as string, req.userId!);
+        res.status(200).json({ success: true });
+    }),
+
+    getTracking: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        const tracking = await trackingService.getForIncident(req.params.id as string, req.userId!);
+        res.status(200).json({ success: true, tracking });
     }),
 };
