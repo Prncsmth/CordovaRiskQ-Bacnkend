@@ -29,6 +29,24 @@ export function emitIncidentUpdate(incidentId: string, payload: IncidentBroadcas
     ioInstance?.to(`incident:${incidentId}`).emit("incident:updated", payload);
 }
 
+export interface ResponderLocationPayload {
+    responderId: string;
+    latitude: number;
+    longitude: number;
+    locationUpdatedAt: string;
+}
+
+// Pushed to the same incident:<id> room join:incident already puts a viewing
+// citizen into (see socket.ts) -- the Track Responder screen's live-map
+// counterpart to emitIncidentUpdate, fired on every PATCH /responders/location
+// (tracking.service.ts) instead of the citizen having to poll for movement.
+export function emitResponderLocationUpdate(
+    incidentId: string,
+    payload: ResponderLocationPayload,
+): void {
+    ioInstance?.to(`incident:${incidentId}`).emit("incident:responderLocation", payload);
+}
+
 // Pushed to every connected admin socket (see socket.ts's "admin" room join)
 // so the dashboard's Recent Activity widget updates live. The REST
 // counterpart (GET /admin/activity, adminService.getRecentActivity) supplies
