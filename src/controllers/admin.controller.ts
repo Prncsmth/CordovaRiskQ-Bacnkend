@@ -44,8 +44,8 @@ export const adminController = {
         res.status(200).json({ success: true, summary });
     }),
 
-    getRecentActivity: asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
-        const activities = await adminService.getRecentActivity();
+    getRecentActivity: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        const activities = await adminService.getRecentActivity(queryInt(req.query.limit));
         res.status(200).json({ success: true, activities });
     }),
 };

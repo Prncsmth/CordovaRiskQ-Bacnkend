@@ -134,21 +134,25 @@ export const adminService = {
         };
     },
 
-    // Derives the dashboard's Recent Activity feed from existing tables --
-    // no dedicated audit-log model. Each source is queried independently
-    // (most recent 10) and merged/sorted/capped by mergeRecentActivity. See
+    // Derives the dashboard's Recent Activity feed (and the Audit Logs
+    // page's fuller view of the same feed) from existing tables -- no
+    // dedicated audit-log model. Each source is queried independently (most
+    // recent `take`) and merged/sorted/capped by mergeRecentActivity. See
     // realtime/emit.ts's emitAdminActivity for the live-update counterpart
     // that covers everything after this initial load.
-    async getRecentActivity() {
+    async getRecentActivity(limit = 10) {
+        const cappedLimit = Math.min(Math.max(limit, 1), 100);
+        const take = cappedLimit;
+
         const [sosAlerts, joinedRows, resolvedIncidents, evacuationCenters, newUsers] = await Promise.all([
             prisma.sosAlert.findMany({
                 orderBy: { createdAt: "desc" },
-                take: 10,
+                take,
             }),
             prisma.incidentResponder.findMany({
                 where: { status: "joined" },
                 orderBy: { createdAt: "desc" },
-                take: 10,
+                take,
                 include: {
                     responder: { select: { name: true } },
                     incident: { select: { locationLabel: true } },
@@ -157,15 +161,15 @@ export const adminService = {
             prisma.incident.findMany({
                 where: { status: "completed" },
                 orderBy: { updatedAt: "desc" },
-                take: 10,
+                take,
             }),
             prisma.evacuationCenter.findMany({
                 orderBy: { updatedAt: "desc" },
-                take: 10,
+                take,
             }),
             prisma.user.findMany({
                 orderBy: { createdAt: "desc" },
-                take: 10,
+                take,
             }),
         ]);
 
@@ -212,6 +216,6 @@ export const adminService = {
             })),
         ];
 
-        return mergeRecentActivity(items);
+        return mergeRecentActivity(items, cappedLimit);
     },
 };
