@@ -152,6 +152,8 @@ function shapeResponders(rows: ResponderRowWithName[]) {
 function buildResponderFacingIncident(
     incident: {
         id: string;
+        source: string;
+        reporterId: string;
         category: string;
         details: string | null;
         locationLabel: string;
@@ -169,6 +171,8 @@ function buildResponderFacingIncident(
     const myRow = responderRows.find((r) => r.responderId === requesterId);
     return {
         id: incident.id,
+        source: incident.source,
+        reporterId: incident.reporterId,
         category: incident.category,
         details: incident.details,
         locationLabel: incident.locationLabel,
