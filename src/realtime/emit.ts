@@ -54,3 +54,16 @@ export function emitResponderLocationUpdate(
 export function emitAdminActivity(activity: AdminActivityItem): void {
     ioInstance?.to("admin").emit("admin:activity", activity);
 }
+
+export interface AdminResponderLocationPayload extends ResponderLocationPayload {
+    incidentId: string;
+    responderName: string;
+}
+
+// Pushed to the "admin" room alongside emitResponderLocationUpdate's
+// per-incident broadcast, so the admin Live Map's responder layer moves
+// live too. GET /admin/responders/en-route (adminService.listEnRouteResponders)
+// supplies the initial load.
+export function emitAdminResponderLocation(payload: AdminResponderLocationPayload): void {
+    ioInstance?.to("admin").emit("admin:responderLocation", payload);
+}

@@ -3,6 +3,7 @@ import { AppError } from "@/utils/AppError";
 import { mergeRecentActivity, type AdminActivityItem } from "@/services/adminActivity";
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+const NON_TERMINAL_STATUSES = ["pending", "lobby", "on_the_way", "arrived"];
 
 export const adminService = {
     async listUsers(filters: {
@@ -132,6 +133,37 @@ export const adminService = {
             mdrrmo,
             unclassified: total - bdrrmo - mdrrmo,
         };
+    },
+
+    // Live Map's responder layer -- only responders currently "on_the_way"
+    // to a non-terminal incident have a fresh location at all (see
+    // tracking.service.ts's updateResponderLocation gate + the mobile app's
+    // useLiveLocationUpload, which only uploads in that phase). Idle
+    // on-duty responders intentionally have no marker; this isn't a general
+    // presence feed.
+    async listEnRouteResponders() {
+        const rows = await prisma.incidentResponder.findMany({
+            where: {
+                status: "on_the_way",
+                incident: { status: { in: NON_TERMINAL_STATUSES } },
+                responder: { latitude: { not: null }, longitude: { not: null } },
+            },
+            select: {
+                incidentId: true,
+                responder: {
+                    select: { id: true, name: true, latitude: true, longitude: true, locationUpdatedAt: true },
+                },
+            },
+        });
+
+        return rows.map((row) => ({
+            responderId: row.responder.id,
+            responderName: row.responder.name ?? "Responder",
+            incidentId: row.incidentId,
+            latitude: row.responder.latitude as number,
+            longitude: row.responder.longitude as number,
+            locationUpdatedAt: row.responder.locationUpdatedAt,
+        }));
     },
 
     // Derives the dashboard's Recent Activity feed (and the Audit Logs

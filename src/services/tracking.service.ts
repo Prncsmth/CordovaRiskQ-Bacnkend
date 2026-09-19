@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
 import { haversineDistanceKm } from "@/utils/geo";
 import { pickAcceptedByResponderId, type ResponderRosterStatus } from "@/services/incidentRoster";
-import { emitResponderLocationUpdate } from "@/realtime/emit";
+import { emitResponderLocationUpdate, emitAdminResponderLocation } from "@/realtime/emit";
 
 const NON_TERMINAL_STATUSES = ["pending", "lobby", "on_the_way", "arrived"];
 
@@ -48,7 +48,7 @@ export const trackingService = {
         }
 
         const locationUpdatedAt = new Date();
-        await prisma.user.update({
+        const responder = await prisma.user.update({
             where: { id: responderId },
             data: { latitude: data.latitude, longitude: data.longitude, locationUpdatedAt },
         });
@@ -56,6 +56,14 @@ export const trackingService = {
         for (const row of activeEnRouteRows) {
             emitResponderLocationUpdate(row.incidentId, {
                 responderId,
+                latitude: data.latitude,
+                longitude: data.longitude,
+                locationUpdatedAt: locationUpdatedAt.toISOString(),
+            });
+            emitAdminResponderLocation({
+                responderId,
+                responderName: responder.name ?? "Responder",
+                incidentId: row.incidentId,
                 latitude: data.latitude,
                 longitude: data.longitude,
                 locationUpdatedAt: locationUpdatedAt.toISOString(),

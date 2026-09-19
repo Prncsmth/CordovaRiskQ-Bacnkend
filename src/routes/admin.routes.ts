@@ -18,6 +18,7 @@ router.patch(
     adminController.updateUserRole
 );
 router.get("/admin/responders/summary", authenticate, requireAdmin, adminController.getResponderSummary);
+router.get("/admin/responders/en-route", authenticate, requireAdmin, adminController.listEnRouteResponders);
 router.get("/admin/activity", authenticate, requireAdmin, adminController.getRecentActivity);
 
 export default router;

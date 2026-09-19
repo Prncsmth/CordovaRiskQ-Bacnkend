@@ -48,4 +48,9 @@ export const adminController = {
         const activities = await adminService.getRecentActivity(queryInt(req.query.limit));
         res.status(200).json({ success: true, activities });
     }),
+
+    listEnRouteResponders: asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
+        const responders = await adminService.listEnRouteResponders();
+        res.status(200).json({ success: true, responders });
+    }),
 };
