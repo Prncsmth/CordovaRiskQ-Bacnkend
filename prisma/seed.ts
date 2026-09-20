@@ -25,9 +25,9 @@ const EVACUATION_CENTERS = [
 // Same six agencies as the mobile app's services/contacts.service.ts used to
 // hardcode. category matches the frontend's old HOTLINE_CATEGORY map exactly.
 const HOTLINES = [
-  { id: "mdrrmo", name: "Cordova MDRRMO (Ambulance / Rescue)", number: "0917-116-9819 / 0917-149-8457", category: "medical" },
+  { id: "mdrrmo", name: "Cordova MDRRMO (Ambulance / Rescue)", number: "0917-149-8457", category: "medical" },
   { id: "police", name: "Cordova Police Station", number: "0998-598-6392", category: "police" },
-  { id: "bfp", name: "Bureau of Fire Protection (BFP) - Cordova", number: "(032) 436-4245 / 0933-394-9073", category: "fire" },
+  { id: "bfp", name: "Bureau of Fire Protection (BFP) - Cordova", number: "0933-394-9073", category: "fire" },
   { id: "coast-guard", name: "Philippine Coast Guard (PCG) - Cordova", number: "0927-941-2486", category: "maritime" },
   { id: "health-center", name: "Cordova Primary Health Care Facility", number: "0967-491-5579", category: "medical" },
   { id: "red-cross", name: "Philippine Red Cross (Lapu-Lapu/Cordova Chapter)", number: "0969-450-8482", category: "medical" },
