@@ -123,8 +123,15 @@ export const historyService = {
             ...(filters.responderId
                 ? { responders: { some: { responderId: filters.responderId } } }
                 : {}),
+            // Filters on when the incident was resolved/cancelled (updatedAt),
+            // not when it was originally reported (createdAt) -- this is a
+            // report of terminal incidents, and updatedAt is already treated
+            // as the completion/cancellation timestamp elsewhere in this file
+            // (buildTimeline, computeResponseTimeSeconds). Filtering on
+            // createdAt instead made "Today"/"This Week" show nothing for any
+            // incident reported earlier and only resolved within the window.
             ...(filters.startDate || filters.endDate
-                ? { createdAt: { gte: filters.startDate, lte: filters.endDate } }
+                ? { updatedAt: { gte: filters.startDate, lte: filters.endDate } }
                 : {}),
         };
 
