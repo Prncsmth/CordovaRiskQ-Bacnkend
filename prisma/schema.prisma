@@ -138,3 +138,12 @@ model EvacuationCenter {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 }
+
+model Hotline {
+  id        String   @id // fixed slug, must match app/contacts/index.tsx's icon/color/image lookup keys
+  name      String
+  number    String
+  category  String   // "police" | "fire" | "medical" | "maritime"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

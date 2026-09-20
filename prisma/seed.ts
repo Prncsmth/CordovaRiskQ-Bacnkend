@@ -22,6 +22,17 @@ const EVACUATION_CENTERS = [
   { id: "san-miguel-elementary", name: "San Miguel Elementary School", address: "Brgy. San Miguel, Cordova, Cebu", category: "school", facilities: ["Water", "Restrooms"], latitude: 10.2626036, longitude: 123.9458152 },
 ];
 
+// Same six agencies as the mobile app's services/contacts.service.ts used to
+// hardcode. category matches the frontend's old HOTLINE_CATEGORY map exactly.
+const HOTLINES = [
+  { id: "mdrrmo", name: "Cordova MDRRMO (Ambulance / Rescue)", number: "0917-116-9819 / 0917-149-8457", category: "medical" },
+  { id: "police", name: "Cordova Police Station", number: "0998-598-6392", category: "police" },
+  { id: "bfp", name: "Bureau of Fire Protection (BFP) - Cordova", number: "(032) 436-4245 / 0933-394-9073", category: "fire" },
+  { id: "coast-guard", name: "Philippine Coast Guard (PCG) - Cordova", number: "0927-941-2486", category: "maritime" },
+  { id: "health-center", name: "Cordova Primary Health Care Facility", number: "0967-491-5579", category: "medical" },
+  { id: "red-cross", name: "Philippine Red Cross (Lapu-Lapu/Cordova Chapter)", number: "0969-450-8482", category: "medical" },
+];
+
 async function seedAdmin() {
   const email = process.env.ADMIN_SEED_EMAIL || "admin@cordova-riskq.local";
   const password = process.env.ADMIN_SEED_PASSWORD;
@@ -62,9 +73,26 @@ async function seedEvacuationCenters() {
   console.log(`Seeded ${EVACUATION_CENTERS.length} evacuation centers`);
 }
 
+async function seedHotlines() {
+  for (const hotline of HOTLINES) {
+    await prisma.hotline.upsert({
+      where: { id: hotline.id },
+      update: {
+        name: hotline.name,
+        number: hotline.number,
+        category: hotline.category,
+      },
+      create: hotline,
+    });
+  }
+
+  console.log(`Seeded ${HOTLINES.length} hotlines`);
+}
+
 async function main() {
   await seedAdmin();
   await seedEvacuationCenters();
+  await seedHotlines();
 }
 
 main()
