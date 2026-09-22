@@ -7,8 +7,10 @@ import { createAnnouncementSchema } from "@/validations/announcement.validation"
 
 const router = Router();
 
-// Public safety content -- no authenticate middleware.
+// Public safety content -- no authenticate middleware. /active is registered
+// first so it isn't shadowed by the /:id route below.
 router.get("/announcements/active", announcementController.getActive);
+router.get("/announcements/:id", announcementController.getById);
 
 router.get("/admin/announcements", authenticate, requireAdmin, announcementController.listForAdmin);
 router.post(
