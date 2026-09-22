@@ -84,6 +84,9 @@ export const announcementService = {
             },
         });
 
+        // TEMP DEBUG
+        console.log("[push-debug] Selected audience:", data.audience);
+
         const notificationData = {
             type: "announcement" as const,
             title: announcement.title,
