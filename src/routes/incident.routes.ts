@@ -2,6 +2,7 @@ import { Router } from "express";
 import { incidentController } from "@/controllers/incident.controller";
 import { authenticate } from "@/middlewares/authenticate.middleware";
 import { requireIncidentInsideCordova } from "@/middlewares/geofence.middleware";
+import { requireResponder } from "@/middlewares/requireResponder.middleware";
 import { validate } from "@/middlewares/validate.middleware";
 import {
     createIncidentSchema,
@@ -25,18 +26,21 @@ router.get("/incidents/:id", authenticate, incidentController.getById);
 router.patch(
     "/incidents/:id/responders/me",
     authenticate,
+    requireResponder,
     validate(updateMyResponderStatusSchema),
     incidentController.updateMyResponderStatus,
 );
 router.patch(
     "/incidents/:id/status",
     authenticate,
+    requireResponder,
     validate(updateIncidentStatusSchema),
     incidentController.updateStatus
 );
 router.post(
     "/incidents/:id/ring",
     authenticate,
+    requireResponder,
     incidentController.ringTeam
 );
 router.patch(
