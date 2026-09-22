@@ -5,6 +5,11 @@ import { asyncHandler } from "@/utils/asyncHandler";
 import { queryInt, queryString } from "@/utils/queryParams";
 
 export const announcementController = {
+    getById: asyncHandler(async (req: Request, res: Response) => {
+        const announcement = await announcementService.getById(req.params.id as string);
+        res.status(200).json({ success: true, announcement });
+    }),
+
     getActive: asyncHandler(async (req: Request, res: Response) => {
         const barangay = typeof req.query.barangay === "string" ? req.query.barangay : undefined;
         const announcement = await announcementService.getActive(barangay);

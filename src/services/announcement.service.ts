@@ -3,6 +3,15 @@ import { AppError } from "@/utils/AppError";
 import { notificationService } from "@/services/notification.service";
 
 export const announcementService = {
+    async getById(id: string) {
+        const announcement = await prisma.announcement.findUnique({
+            where: { id },
+            include: { createdBy: { select: { name: true } } },
+        });
+        if (!announcement) throw new AppError("Announcement not found", 404);
+        return announcement;
+    },
+
     async getActive(barangayName?: string) {
         const conditions: Array<Record<string, unknown>> = [{ audience: "All Users" }];
 
@@ -75,12 +84,29 @@ export const announcementService = {
             },
         });
 
+        const notificationData = {
+            type: "announcement" as const,
+            title: announcement.title,
+            body: announcement.content,
+            referenceId: announcement.id,
+        };
+
         if (data.audience === "All Users") {
-            await notificationService.createForAllCitizens({
-                type: "announcement",
-                title: announcement.title,
-                body: announcement.content,
+            await notificationService.createForAllCitizens(notificationData);
+            await notificationService.createForAllResponders(notificationData, {
+                onDutyOnly: false,
             });
+        } else if (data.audience === "Responders Only") {
+            await notificationService.createForAllResponders(notificationData, {
+                onDutyOnly: false,
+            });
+        } else if (data.audience === "Specific Barangay") {
+            // No-op for now: User has no per-citizen barangay/location field to
+            // filter by, so there's no accurate way to target this audience yet.
+            // The announcement is still created and shown in-app.
+            console.info(
+                "Specific Barangay push skipped: User model has no barangay field yet."
+            );
         }
 
         return announcement;

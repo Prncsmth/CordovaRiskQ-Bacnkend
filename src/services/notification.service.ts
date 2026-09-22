@@ -34,12 +34,20 @@ function chunk<T>(items: T[], size: number): T[][] {
 
 async function sendPushToRecipients(
     recipients: { id: string; pushToken: string | null }[],
-    data: { title: string; body: string }
+    data: NotificationData
 ) {
     const targets = recipients.filter(
         (r): r is { id: string; pushToken: string } => r.pushToken !== null
     );
     if (targets.length === 0) return;
+
+    // Lets the frontend deep-link a tapped notification (e.g. straight to an
+    // incident) without a second API call -- referenceId is only present
+    // when the caller has one (e.g. omitted for announcements).
+    const expoData = {
+        type: data.type,
+        ...(data.referenceId ? { referenceId: data.referenceId } : {}),
+    };
 
     try {
         for (const targetChunk of chunk(targets, EXPO_PUSH_CHUNK_SIZE)) {
@@ -47,7 +55,12 @@ async function sendPushToRecipients(
                 method: "POST",
                 headers: { Accept: "application/json", "Content-Type": "application/json" },
                 body: JSON.stringify(
-                    targetChunk.map((t) => ({ to: t.pushToken, title: data.title, body: data.body }))
+                    targetChunk.map((t) => ({
+                        to: t.pushToken,
+                        title: data.title,
+                        body: data.body,
+                        data: expoData,
+                    }))
                 ),
                 signal: AbortSignal.timeout(15_000),
             });
@@ -127,7 +140,7 @@ export const notificationService = {
                 select: { id: true, pushToken: true },
             });
 
-            await sendPushToRecipients(recipients, { title: data.title, body: data.body });
+            await sendPushToRecipients(recipients, data);
         } catch (error) {
             console.error("Failed to create notifications for users:", error);
         }
@@ -153,12 +166,15 @@ export const notificationService = {
     },
 
     // Mirrors createForAllCitizens, for fanning a new-incident alert out to
-    // every on-duty responder account. Off-duty responders are excluded --
-    // going offline is meaningless if it doesn't stop new-incident pages.
-    async createForAllResponders(data: NotificationData) {
+    // every responder account. Defaults to on-duty only -- off-duty
+    // responders are excluded, since going offline is meaningless if it
+    // doesn't stop new-incident pages. Callers like announcements, which
+    // aren't tied to duty status, opt into { onDutyOnly: false }.
+    async createForAllResponders(data: NotificationData, options?: { onDutyOnly?: boolean }) {
+        const onDutyOnly = options?.onDutyOnly ?? true;
         try {
             const responders = await prisma.user.findMany({
-                where: { role: "responder", isOnDuty: true },
+                where: { role: "responder", ...(onDutyOnly ? { isOnDuty: true } : {}) },
                 select: { id: true },
             });
             await this.createForUsers(
