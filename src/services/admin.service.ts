@@ -87,6 +87,7 @@ export const adminService = {
         const users = await prisma.user.findMany({
             select: { id: true, name: true, email: true },
             orderBy: { createdAt: "desc" },
+            take: 100,
         });
 
         return users.map((user) => ({ id: user.id, name: user.name ?? user.email }));

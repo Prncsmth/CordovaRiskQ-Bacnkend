@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { userController } from "@/controllers/user.controller";
 import { authenticate } from "@/middlewares/authenticate.middleware";
+import { requireResponder } from "@/middlewares/requireResponder.middleware";
 import { validate } from "@/middlewares/validate.middleware";
 import {
     updateProfileSchema,
@@ -33,6 +34,7 @@ router.patch(
 router.patch(
     "/users/duty-status",
     authenticate,
+    requireResponder,
     validate(updateDutyStatusSchema),
     userController.updateDutyStatus
 );

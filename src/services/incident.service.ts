@@ -10,7 +10,7 @@ import {
     type ResponderRosterStatus,
 } from "@/services/incidentRoster";
 import { canCancelIncident, canViewIncident } from "@/services/incidentAuthorization";
-import { emitAdminActivity } from "@/realtime/emit";
+import { emitAdminActivity, emitAdminIncidentUpdate } from "@/realtime/emit";
 
 const URGENCY_BY_CATEGORY: Record<string, string> = {
     fire: "high",
@@ -189,6 +189,18 @@ function buildResponderFacingIncident(
     };
 }
 
+// Strips the per-viewer myStatus field buildResponderFacingIncident computes
+// and stringifies the dates, shaping its result for emitAdminIncidentUpdate's
+// shared-broadcast payload (myStatus can't be broadcast to every admin at
+// once the same way it can't be broadcast to every responder -- see
+// IncidentBroadcastPayload's comment in realtime/emit.ts).
+function toAdminIncidentPayload(
+    incident: ReturnType<typeof buildResponderFacingIncident>,
+) {
+    const { myStatus: _myStatus, createdAt, updatedAt, ...rest } = incident;
+    return { ...rest, createdAt: createdAt.toISOString(), updatedAt: updatedAt.toISOString() };
+}
+
 export const incidentService = {
     async create(
         reporterId: string,
@@ -217,6 +229,13 @@ export const incidentService = {
             title: "New incident reported",
             body: `A ${data.category} incident was reported near ${data.locationLabel}.`,
             referenceId: incident.id,
+        });
+        emitAdminIncidentUpdate({
+            ...incident,
+            createdAt: incident.createdAt.toISOString(),
+            updatedAt: incident.updatedAt.toISOString(),
+            acceptedByResponderId: null,
+            responders: [],
         });
         return incident;
     },
@@ -247,6 +266,13 @@ export const incidentService = {
             title: "SOS alert",
             body: "An SOS alert was triggered nearby.",
             referenceId: incident.id,
+        });
+        emitAdminIncidentUpdate({
+            ...incident,
+            createdAt: incident.createdAt.toISOString(),
+            updatedAt: incident.updatedAt.toISOString(),
+            acceptedByResponderId: null,
+            responders: [],
         });
         return incident;
     },
@@ -381,7 +407,9 @@ export const incidentService = {
             });
         }
 
-        return buildResponderFacingIncident(updatedIncident, allRows, responderId);
+        const result = buildResponderFacingIncident(updatedIncident, allRows, responderId);
+        emitAdminIncidentUpdate(toAdminIncidentPayload(result));
+        return result;
     },
 
     async updateStatus(id: string, responderId: string, status: "completed" | "cancelled") {
@@ -430,7 +458,9 @@ export const incidentService = {
             await notifyTeammatesOfClosure(id, responderId, status, allRows);
         }
 
-        return buildResponderFacingIncident(updatedIncident, allRows, responderId);
+        const result = buildResponderFacingIncident(updatedIncident, allRows, responderId);
+        emitAdminIncidentUpdate(toAdminIncidentPayload(result));
+        return result;
     },
 
     // Citizen-facing cancel -- the counterpart to updateStatus above, which
@@ -459,7 +489,9 @@ export const incidentService = {
             include: { responder: { select: { name: true } } },
         });
 
-        return buildResponderFacingIncident(updatedIncident, allRows, reporterId);
+        const result = buildResponderFacingIncident(updatedIncident, allRows, reporterId);
+        emitAdminIncidentUpdate(toAdminIncidentPayload(result));
+        return result;
     },
 
     // Lets a reporter clear a closed report out of their own history. Only

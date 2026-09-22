@@ -67,3 +67,32 @@ export interface AdminResponderLocationPayload extends ResponderLocationPayload 
 export function emitAdminResponderLocation(payload: AdminResponderLocationPayload): void {
     ioInstance?.to("admin").emit("admin:responderLocation", payload);
 }
+
+// Full admin-shaped incident row (same field set GET /incidents returns per
+// item) -- unlike IncidentBroadcastPayload above, this carries everything
+// the admin frontend's Emergency mapper needs (category, locationLabel,
+// coordinates, etc.), not just the status/roster delta, since it also has to
+// cover a brand-new incident the admin dashboard has never fetched before.
+export interface AdminIncidentPayload {
+    id: string;
+    source: string;
+    reporterId: string;
+    category: string;
+    details: string | null;
+    locationLabel: string;
+    latitude: number | null;
+    longitude: number | null;
+    status: string;
+    createdAt: string;
+    updatedAt: string;
+    acceptedByResponderId: string | null;
+    responders: { id: string; name: string; status: string }[];
+}
+
+// Pushed to the "admin" room on every incident create/status/roster change so
+// the "Live Incidents" list and the Live Map's incident markers actually
+// update live, the same way responder locations and the activity feed
+// already do -- GET /incidents supplies the initial load.
+export function emitAdminIncidentUpdate(payload: AdminIncidentPayload): void {
+    ioInstance?.to("admin").emit("admin:incidentUpdate", payload);
+}
