@@ -12,7 +12,9 @@ export const changePasswordSchema = z.object({
 });
 
 export const updatePushTokenSchema = z.object({
-    token: z.string().min(1, "Push token is required"),
+    // null clears the stored token (push-notifications opt-out) -- a plain
+    // string still must be non-empty when actually registering one.
+    token: z.string().min(1, "Push token is required").nullable(),
 });
 
 export const updateDutyStatusSchema = z.object({

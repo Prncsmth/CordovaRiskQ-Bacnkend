@@ -67,7 +67,18 @@ export const userService = {
         });
     },
 
-    async updatePushToken(userId: string, token: string) {
+    async updatePushToken(userId: string, token: string | null) {
+        if (token === null) {
+            // Push-notifications opt-out -- just clear this user's own token,
+            // no anti-collision cleanup needed since we're not writing a
+            // token anywhere.
+            await prisma.user.update({
+                where: { id: userId },
+                data: { pushToken: null },
+            });
+            return;
+        }
+
         // Clear this token from any other user's row first -- on a shared
         // device, a stale token left behind after a logout/login switch
         // could otherwise deliver a different user's notifications to
