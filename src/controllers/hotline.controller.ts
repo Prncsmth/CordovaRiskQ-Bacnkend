@@ -8,4 +8,9 @@ export const hotlineController = {
         const hotlines = await hotlineService.list();
         res.status(200).json({ success: true, hotlines });
     }),
+
+    update: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        const hotline = await hotlineService.update(req.params.id as string, req.body);
+        res.status(200).json({ success: true, hotline });
+    }),
 };

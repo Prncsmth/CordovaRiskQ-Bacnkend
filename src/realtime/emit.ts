@@ -131,3 +131,17 @@ export interface EvacuationCenterUpdatePayload {
 export function emitEvacuationCenterUpdated(payload: EvacuationCenterUpdatePayload): void {
     ioInstance?.emit("evacuationCenter:updated", payload);
 }
+
+// Mirrors emitEvacuationCenterUpdated -- hotline name/number/category are
+// shared reference data too, so hotline.service.ts's update broadcasts to
+// every connected socket the instant an admin edits one.
+export interface HotlineUpdatePayload {
+    id: string;
+    name: string;
+    number: string;
+    category: string;
+}
+
+export function emitHotlineUpdated(payload: HotlineUpdatePayload): void {
+    ioInstance?.emit("hotline:updated", payload);
+}
