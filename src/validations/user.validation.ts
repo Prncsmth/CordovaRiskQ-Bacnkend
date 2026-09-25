@@ -1,9 +1,29 @@
 import { z } from "zod";
 
+// Accepts "09171234567" or "+639171234567", with or without spaces/dashes
+// (e.g. the "+63 912 345 6789" format app/phone-number.tsx saves) -- spaces
+// and dashes are stripped before matching.
+const PH_MOBILE_REGEX = /^(\+639\d{9}|09\d{9})$/;
+
 export const updateProfileSchema = z.object({
     name: z.string().optional(),
-    email: z.string().email("Invalid email address"),
-    mobile: z.string().optional(),
+    email: z
+        .string()
+        .trim()
+        .email("Invalid email address")
+        .refine((value) => value.toLowerCase().endsWith("@gmail.com"), {
+            message: "Only Gmail addresses (@gmail.com) are allowed",
+        }),
+    // Optional: some accounts (e.g. admin-provisioned responders) never go
+    // through the mobile-number onboarding gate. When a value IS given, it
+    // must be a real PH mobile number -- not just any string.
+    mobile: z
+        .string()
+        .optional()
+        .refine(
+            (value) => !value || PH_MOBILE_REGEX.test(value.replace(/[\s-]/g, "")),
+            { message: "Enter a valid PH mobile number (e.g. 09171234567)" },
+        ),
 });
 
 export const changePasswordSchema = z.object({
