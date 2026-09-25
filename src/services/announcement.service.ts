@@ -99,6 +99,7 @@ export const announcementService = {
             await notificationService.createForAllResponders(notificationData, {
                 onDutyOnly: false,
             });
+            await notificationService.createForAllAdmins(notificationData);
         } else if (data.audience === "Responders Only") {
             await notificationService.createForAllResponders(notificationData, {
                 onDutyOnly: false,

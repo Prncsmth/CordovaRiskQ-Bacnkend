@@ -230,4 +230,26 @@ export const notificationService = {
             console.error("Failed to create notifications for all responders:", error);
         }
     },
+
+    // Mirrors createForAllCitizens/createForAllResponders. "All Users"
+    // announcements previously only fanned out to role "citizen" and
+    // "responder", silently skipping role "admin" -- since admin accounts
+    // share the same User table/login as citizens and responders (an admin
+    // can also open the mobile app), an "All Users" announcement should
+    // reach them too, matching what the audience label actually says.
+    async createForAllAdmins(data: NotificationData) {
+        try {
+            const admins = await prisma.user.findMany({
+                where: { role: "admin" },
+                select: { id: true },
+            });
+
+            await this.createForUsers(
+                admins.map((a) => a.id),
+                data
+            );
+        } catch (error) {
+            console.error("Failed to create notifications for all admins:", error);
+        }
+    },
 };
