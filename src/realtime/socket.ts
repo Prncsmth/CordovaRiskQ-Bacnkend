@@ -40,6 +40,15 @@ export function initRealtime(httpServer: HttpServer): void {
     });
 
     io.on("connection", (socket: AuthenticatedSocket) => {
+        // Every authenticated socket auto-joins its own user:<id> room so
+        // emitNotificationCreated (see realtime/emit.ts) can push a
+        // notification straight to its owner, regardless of role or which
+        // screen they're on -- the per-user counterpart to the "admin" and
+        // "incident:<id>" rooms below.
+        if (socket.userId) {
+            socket.join(`user:${socket.userId}`);
+        }
+
         // Admin dashboard sockets auto-join a shared room so
         // emitAdminActivity (see realtime/emit.ts) can push Recent Activity
         // updates to every admin at once, the same way join:incident scopes

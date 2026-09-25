@@ -96,3 +96,23 @@ export interface AdminIncidentPayload {
 export function emitAdminIncidentUpdate(payload: AdminIncidentPayload): void {
     ioInstance?.to("admin").emit("admin:incidentUpdate", payload);
 }
+
+// Mirrors the Notification row shape GET /api/notifications returns --
+// notification.service.ts's createForUsers fires this right after writing
+// each row, so it reaches the owner's user:<id> room (see socket.ts) the
+// instant it's created, whatever notification type it is (announcement,
+// incident_status, tide_risk, etc.) and wherever in the app they are.
+export interface NotificationPayload {
+    id: string;
+    userId: string;
+    type: string;
+    title: string;
+    body: string;
+    read: boolean;
+    referenceId: string | null;
+    createdAt: string;
+}
+
+export function emitNotificationCreated(userId: string, payload: NotificationPayload): void {
+    ioInstance?.to(`user:${userId}`).emit("notification:new", payload);
+}

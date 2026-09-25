@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
+import { emitNotificationCreated } from "@/realtime/emit";
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 // Expo's push API rejects an entire request if it carries more than 100
@@ -159,9 +160,25 @@ export const notificationService = {
         if (userIds.length === 0) return;
 
         try {
-            await prisma.notification.createMany({
+            const created = await prisma.notification.createManyAndReturn({
                 data: userIds.map((userId) => ({ userId, ...data })),
             });
+
+            // Pushed the instant each row is written -- see user:<id> room
+            // join in realtime/socket.ts -- so a connected client sees it
+            // live instead of waiting for its next GET /api/notifications.
+            for (const row of created) {
+                emitNotificationCreated(row.userId, {
+                    id: row.id,
+                    userId: row.userId,
+                    type: row.type,
+                    title: row.title,
+                    body: row.body,
+                    read: row.read,
+                    referenceId: row.referenceId,
+                    createdAt: row.createdAt.toISOString(),
+                });
+            }
 
             const recipients = await prisma.user.findMany({
                 where: { id: { in: userIds }, pushToken: { not: null } },
