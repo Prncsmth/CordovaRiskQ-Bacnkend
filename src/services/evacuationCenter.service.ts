@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
-import { emitAdminActivity } from "@/realtime/emit";
+import { emitAdminActivity, emitEvacuationCenterUpdated } from "@/realtime/emit";
 
 export const evacuationCenterService = {
     async list() {
@@ -23,6 +23,11 @@ export const evacuationCenterService = {
             title: "Evacuation center updated",
             detail: updated.name,
             occurredAt: updated.updatedAt.toISOString(),
+        });
+        emitEvacuationCenterUpdated({
+            id: updated.id,
+            status: updated.status,
+            facilities: updated.facilities,
         });
 
         return updated;

@@ -116,3 +116,18 @@ export interface NotificationPayload {
 export function emitNotificationCreated(userId: string, payload: NotificationPayload): void {
     ioInstance?.to(`user:${userId}`).emit("notification:new", payload);
 }
+
+// Evacuation center status/facilities are shared reference data, not scoped
+// to one user -- unlike the room-targeted emits above, this broadcasts to
+// every connected socket (citizen, responder, or admin) so evacuation-center.service.ts's
+// update fans out live the instant an admin edits a center, with no
+// join step required on the client side.
+export interface EvacuationCenterUpdatePayload {
+    id: string;
+    status: string;
+    facilities: string[];
+}
+
+export function emitEvacuationCenterUpdated(payload: EvacuationCenterUpdatePayload): void {
+    ioInstance?.emit("evacuationCenter:updated", payload);
+}
