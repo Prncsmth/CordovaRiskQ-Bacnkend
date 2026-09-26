@@ -1,6 +1,7 @@
 import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
+import { emitAdminResponderDutyChanged } from "@/realtime/emit";
 
 export const userService = {
     async getById(userId: string) {
@@ -94,9 +95,10 @@ export const userService = {
     },
 
     async updateDutyStatus(userId: string, isOnDuty: boolean) {
-        await prisma.user.update({
+        const user = await prisma.user.update({
             where: { id: userId },
             data: { isOnDuty },
         });
+        emitAdminResponderDutyChanged({ id: user.id, name: user.name, isOnDuty: user.isOnDuty });
     },
 };

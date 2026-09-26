@@ -145,3 +145,19 @@ export interface HotlineUpdatePayload {
 export function emitHotlineUpdated(payload: HotlineUpdatePayload): void {
     ioInstance?.emit("hotline:updated", payload);
 }
+
+export interface AdminResponderDutyPayload {
+    id: string;
+    name: string | null;
+    isOnDuty: boolean;
+}
+
+// Pushed to the "admin" room whenever a responder toggles duty (see
+// user.service.ts's updateDutyStatus) so the Responders page's table and
+// summary cards, the responder detail view, and the dashboard's Responder
+// Status donut all update live instead of only reflecting it on next
+// load/poll -- GET /admin/users and GET /admin/responders/summary supply
+// the initial load.
+export function emitAdminResponderDutyChanged(payload: AdminResponderDutyPayload): void {
+    ioInstance?.to("admin").emit("admin:responderDutyChanged", payload);
+}
