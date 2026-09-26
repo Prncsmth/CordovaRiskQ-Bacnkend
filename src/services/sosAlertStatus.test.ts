@@ -13,7 +13,7 @@ test("incidentStatusToAlertStatus maps each incident lifecycle stage to its buck
     assert.equal(incidentStatusToAlertStatus("on_the_way"), "Acknowledged");
     assert.equal(incidentStatusToAlertStatus("arrived"), "Acknowledged");
     assert.equal(incidentStatusToAlertStatus("completed"), "Resolved");
-    assert.equal(incidentStatusToAlertStatus("cancelled"), "Resolved");
+    assert.equal(incidentStatusToAlertStatus("cancelled"), "Cancelled");
 });
 
 test("incidentStatusToAlertStatus treats a missing incident as New", () => {
@@ -52,6 +52,6 @@ test("countAlertsByStatus buckets every id and reports the total", () => {
 
     assert.deepEqual(
         countAlertsByStatus(["a1", "a2", "a3", "a4", "a5"], statusByAlertId),
-        { New: 2, Acknowledged: 1, Resolved: 2, total: 5 },
+        { New: 2, Acknowledged: 1, Resolved: 1, Cancelled: 1, total: 5 },
     );
 });

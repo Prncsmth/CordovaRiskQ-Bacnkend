@@ -177,8 +177,16 @@ export const adminService = {
         const cappedLimit = Math.min(Math.max(limit, 1), 100);
         const take = cappedLimit;
 
-        const [sosAlerts, joinedRows, resolvedIncidents, evacuationCenters, newUsers] = await Promise.all([
+        const [sosAlerts, reportedIncidents, joinedRows, resolvedIncidents, evacuationCenters, newUsers] = await Promise.all([
             prisma.sosAlert.findMany({
+                orderBy: { createdAt: "desc" },
+                take,
+            }),
+            // Mirrors the live emitAdminActivity("incident_reported") call in
+            // incident.service.ts's create() -- this is that same event's
+            // history, for a fresh page load that missed the live push.
+            prisma.incident.findMany({
+                where: { source: "report" },
                 orderBy: { createdAt: "desc" },
                 take,
             }),
@@ -222,6 +230,12 @@ export const adminService = {
                 title: "New SOS alert received",
                 detail: locationBySosAlertId.get(alert.id) ?? "Location unavailable",
                 occurredAt: alert.createdAt.toISOString(),
+            })),
+            ...reportedIncidents.map((incident) => ({
+                type: "incident_reported" as const,
+                title: "New incident reported",
+                detail: incident.locationLabel,
+                occurredAt: incident.createdAt.toISOString(),
             })),
             ...joinedRows.map((row) => ({
                 type: "responder_joined" as const,

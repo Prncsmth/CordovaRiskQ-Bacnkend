@@ -237,6 +237,18 @@ export const incidentService = {
             acceptedByResponderId: null,
             responders: [],
         });
+        // Separate from the incident-list broadcast above -- this is what
+        // actually reaches the admin Notifications bell (see
+        // realtime/emit.ts's emitAdminActivity); without it a citizen's
+        // report updated the Live Incidents list/map but never notified
+        // anyone, unlike an SOS trigger which already fires this in
+        // sos.service.ts.
+        emitAdminActivity({
+            type: "incident_reported",
+            title: "New incident reported",
+            detail: incident.locationLabel,
+            occurredAt: incident.createdAt.toISOString(),
+        });
         return incident;
     },
 

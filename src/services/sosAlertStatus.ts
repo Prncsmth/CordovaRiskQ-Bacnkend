@@ -6,7 +6,7 @@
 // unit-tested directly. Mirrors the equivalent mapping already duplicated in
 // cordova-riskq-admin's useSosAlerts.ts.
 
-export type AlertStatus = "New" | "Acknowledged" | "Resolved";
+export type AlertStatus = "New" | "Acknowledged" | "Resolved" | "Cancelled";
 
 const INCIDENT_STATUS_TO_ALERT_STATUS: Record<string, AlertStatus> = {
     pending: "New",
@@ -14,7 +14,10 @@ const INCIDENT_STATUS_TO_ALERT_STATUS: Record<string, AlertStatus> = {
     on_the_way: "Acknowledged",
     arrived: "Acknowledged",
     completed: "Resolved",
-    cancelled: "Resolved",
+    // Was folded into "Resolved" -- a citizen who cancelled their own SOS
+    // read on the admin dashboard as if a responder had actually resolved
+    // it, indistinguishable from a genuinely handled alert.
+    cancelled: "Cancelled",
 };
 
 export function incidentStatusToAlertStatus(incidentStatus: string | undefined): AlertStatus {
@@ -35,8 +38,8 @@ export function filterAlertIdsByStatus(
 export function countAlertsByStatus(
     allAlertIds: string[],
     incidentStatusByAlertId: Map<string, string>,
-): { New: number; Acknowledged: number; Resolved: number; total: number } {
-    const counts = { New: 0, Acknowledged: 0, Resolved: 0, total: allAlertIds.length };
+): { New: number; Acknowledged: number; Resolved: number; Cancelled: number; total: number } {
+    const counts = { New: 0, Acknowledged: 0, Resolved: 0, Cancelled: 0, total: allAlertIds.length };
     for (const id of allAlertIds) {
         counts[incidentStatusToAlertStatus(incidentStatusByAlertId.get(id))]++;
     }

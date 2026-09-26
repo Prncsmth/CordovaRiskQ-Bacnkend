@@ -5,7 +5,7 @@ import { asyncHandler } from "@/utils/asyncHandler";
 import { queryDate, queryInt, queryString } from "@/utils/queryParams";
 import type { AlertStatus } from "@/services/sosAlertStatus";
 
-const ALERT_STATUSES: AlertStatus[] = ["New", "Acknowledged", "Resolved"];
+const ALERT_STATUSES: AlertStatus[] = ["New", "Acknowledged", "Resolved", "Cancelled"];
 
 function queryAlertStatus(value: unknown): AlertStatus | undefined {
     const str = queryString(value);
