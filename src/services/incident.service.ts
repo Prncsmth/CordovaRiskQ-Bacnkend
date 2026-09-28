@@ -1,5 +1,5 @@
-import { prisma } from "@/lib/prisma";
-import type { Incident, Prisma } from "@/generated/prisma/client";
+import { prisma, type DbTransactionClient } from "@/lib/prisma";
+import type { Incident } from "@/generated/prisma/client";
 import { AppError } from "@/utils/AppError";
 import { notificationService } from "@/services/notification.service";
 import {
@@ -260,7 +260,7 @@ export const incidentService = {
         reporterId: string,
         sosAlertId: string,
         data: { latitude?: number; longitude?: number; locationLabel?: string },
-        db: Prisma.TransactionClient = prisma
+        db: DbTransactionClient = prisma
     ) {
         return db.incident.create({
             data: {

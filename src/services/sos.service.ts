@@ -1,11 +1,11 @@
-import { prisma } from "@/lib/prisma";
-import type { Incident, Prisma } from "@/generated/prisma/client";
+import { prisma, type DbTransactionClient } from "@/lib/prisma";
+import type { Incident } from "@/generated/prisma/client";
 import { incidentService, NON_TERMINAL_STATUSES } from "@/services/incident.service";
 import { emitAdminActivity } from "@/realtime/emit";
 import { type AlertStatus, countAlertsByStatus, filterAlertIdsByStatus } from "@/services/sosAlertStatus";
 import { type SosStore, type SosTriggerInput, triggerSos } from "@/services/sosTrigger";
 
-function createSosStore(tx: Prisma.TransactionClient): SosStore<Incident> {
+function createSosStore(tx: DbTransactionClient): SosStore<Incident> {
     return {
         async findActive(userId) {
             const incident = await tx.incident.findFirst({
