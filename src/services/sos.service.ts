@@ -1,7 +1,60 @@
 import { prisma } from "@/lib/prisma";
-import { incidentService } from "@/services/incident.service";
+import type { Incident, Prisma } from "@/generated/prisma/client";
+import { incidentService, NON_TERMINAL_STATUSES } from "@/services/incident.service";
 import { emitAdminActivity } from "@/realtime/emit";
 import { type AlertStatus, countAlertsByStatus, filterAlertIdsByStatus } from "@/services/sosAlertStatus";
+import { type SosStore, type SosTriggerInput, triggerSos } from "@/services/sosTrigger";
+
+function createSosStore(tx: Prisma.TransactionClient): SosStore<Incident> {
+    return {
+        async findActive(userId) {
+            const incident = await tx.incident.findFirst({
+                where: {
+                    reporterId: userId,
+                    source: "sos",
+                    sosAlertId: { not: null },
+                    status: { in: NON_TERMINAL_STATUSES },
+                },
+                orderBy: { createdAt: "desc" },
+                select: { id: true, sosAlertId: true },
+            });
+            if (!incident) return null;
+
+            const alert = await tx.sosAlert.findUnique({
+                where: { id: incident.sosAlertId as string },
+                select: { id: true, status: true, createdAt: true },
+            });
+            return alert ? { alert, incidentId: incident.id } : null;
+        },
+
+        async create(userId, data) {
+            const alert = await tx.sosAlert.create({
+                data: {
+                    userId,
+                    latitude: data.latitude,
+                    longitude: data.longitude,
+                },
+            });
+
+            // Best-effort: the SOS record itself is the primary outcome and
+            // must still succeed even if this mirror write fails. The
+            // savepoint keeps a failed insert from aborting the surrounding
+            // transaction (and with it the alert). incidentId stays null in
+            // that case -- the frontend just won't be able to offer a cancel
+            // action, since there's nothing to cancel.
+            await tx.$executeRaw`SAVEPOINT sos_incident`;
+            try {
+                const incident = await incidentService.createFromSos(userId, alert.id, data, tx);
+                await tx.$executeRaw`RELEASE SAVEPOINT sos_incident`;
+                return { alert, incident };
+            } catch (err) {
+                await tx.$executeRaw`ROLLBACK TO SAVEPOINT sos_incident`;
+                console.error("Failed to create linked incident for SOS alert", alert.id, err);
+                return { alert, incident: null };
+            }
+        },
+    };
+}
 
 export type SosAlertAdminFilters = {
     status?: string;
@@ -15,47 +68,34 @@ export type SosAlertAdminFilters = {
 };
 
 export const sosService = {
-    async trigger(
-        userId: string,
-        data: { latitude: number; longitude: number; locationLabel?: string }
-    ) {
-        const alert = await prisma.sosAlert.create({
-            data: {
-                userId,
-                latitude: data.latitude,
-                longitude: data.longitude,
+    // Idempotent per user: while the user's SOS incident is still active, a
+    // repeat tap returns that same SOS (duplicate: true) instead of creating
+    // another one and re-paging every responder. See sosTrigger.ts.
+    trigger(userId: string, data: SosTriggerInput) {
+        return triggerSos<Incident>(userId, data, {
+            runExclusive: (lockUserId, work) =>
+                prisma.$transaction(
+                    async (tx) => {
+                        // Serializes concurrent taps from the same user until
+                        // commit; released automatically with the transaction.
+                        await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`sos:${lockUserId}`}))`;
+                        return work(createSosStore(tx));
+                    },
+                    // Generous limits so a burst of SOS queuing for pool
+                    // connections doesn't fail on Prisma's 2s/5s defaults.
+                    { maxWait: 10_000, timeout: 15_000 }
+                ),
+            announce: (alert, incident, input) => {
+                emitAdminActivity({
+                    type: "sos_alert",
+                    title: "New SOS alert received",
+                    detail: input.locationLabel ?? "Location unavailable",
+                    occurredAt: alert.createdAt.toISOString(),
+                });
+                if (incident) incidentService.announceSosIncident(incident);
             },
+            notifyResponders: (incident) => incidentService.notifyRespondersOfSos(incident),
         });
-
-        emitAdminActivity({
-            type: "sos_alert",
-            title: "New SOS alert received",
-            detail: data.locationLabel ?? "Location unavailable",
-            occurredAt: alert.createdAt.toISOString(),
-        });
-
-        // Best-effort: the SOS record itself is the primary outcome and must
-        // still succeed even if this mirror write fails. incidentId stays
-        // null in that case -- the frontend just won't be able to offer a
-        // cancel action, since there's nothing to cancel.
-        let incidentId: string | null = null;
-        try {
-            const incident = await incidentService.createFromSos(userId, alert.id, data);
-            incidentId = incident.id;
-        } catch (err) {
-            console.error(
-                "Failed to create linked incident for SOS alert",
-                alert.id,
-                err
-            );
-        }
-
-        return {
-            id: alert.id,
-            status: alert.status,
-            createdAt: alert.createdAt,
-            incidentId,
-        };
     },
 
     // SosAlert itself has no barangay/location-label column (see trigger()
