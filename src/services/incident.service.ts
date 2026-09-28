@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import type { Incident, Prisma } from "@/generated/prisma/client";
 import { AppError } from "@/utils/AppError";
 import { notificationService } from "@/services/notification.service";
 import {
@@ -20,7 +21,7 @@ const URGENCY_BY_CATEGORY: Record<string, string> = {
     other: "low",
 };
 
-const NON_TERMINAL_STATUSES = ["pending", "lobby", "on_the_way", "arrived"];
+export const NON_TERMINAL_STATUSES =["pending", "lobby", "on_the_way", "arrived"];
 
 const STATUS_NOTIFICATION_COPY: Record<string, { title: string; body: string }> = {
     lobby: { title: "Responder assigned", body: "A responder has accepted your report." },
@@ -252,12 +253,16 @@ export const incidentService = {
         return incident;
     },
 
+    // Write-only: runs inside sosService.trigger's per-user transaction, so
+    // the admin broadcast and responder push live in announceSosIncident /
+    // notifyRespondersOfSos and fire only after that transaction commits.
     async createFromSos(
         reporterId: string,
         sosAlertId: string,
-        data: { latitude?: number; longitude?: number; locationLabel?: string }
+        data: { latitude?: number; longitude?: number; locationLabel?: string },
+        db: Prisma.TransactionClient = prisma
     ) {
-        const incident = await prisma.incident.create({
+        return db.incident.create({
             data: {
                 source: "sos",
                 reporterId,
@@ -273,12 +278,9 @@ export const incidentService = {
                 urgency: "high",
             },
         });
-        await notificationService.createForAllResponders({
-            type: "new_incident",
-            title: "SOS alert",
-            body: "An SOS alert was triggered nearby.",
-            referenceId: incident.id,
-        });
+    },
+
+    announceSosIncident(incident: Incident) {
         emitAdminIncidentUpdate({
             ...incident,
             createdAt: incident.createdAt.toISOString(),
@@ -286,7 +288,15 @@ export const incidentService = {
             acceptedByResponderId: null,
             responders: [],
         });
-        return incident;
+    },
+
+    notifyRespondersOfSos(incident: Incident) {
+        return notificationService.createForAllResponders({
+            type: "new_incident",
+            title: "SOS alert",
+            body: "An SOS alert was triggered nearby.",
+            referenceId: incident.id,
+        });
     },
 
     async list(responderId: string) {
