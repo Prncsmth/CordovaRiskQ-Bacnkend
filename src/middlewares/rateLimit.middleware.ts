@@ -24,4 +24,26 @@ export const registerLimiter = createRateLimiter(
     3,
     "Too many registration attempts. Please try again in a minute."
 );
-    
+
+// change-password re-verifies the caller's current password via bcrypt.compare
+// with no other limit on that route -- without this, a stolen JWT (without
+// the actual password) could be used to brute-force it and take over the
+// account permanently. Same category as loginLimiter, just a longer window
+// since this is an authenticated, lower-frequency action.
+export const changePasswordLimiter = createRateLimiter(
+    60 * 60 * 1000,
+    5,
+    "Too many password change attempts. Please try again later."
+);
+
+export const requestOtpLimiter = createRateLimiter(
+    5 * 60 * 1000,
+    5,
+    "Too many verification code requests. Please try again in a few minutes."
+);
+
+export const verifyOtpLimiter = createRateLimiter(
+    5 * 60 * 1000,
+    10,
+    "Too many attempts. Please try again in a few minutes."
+);

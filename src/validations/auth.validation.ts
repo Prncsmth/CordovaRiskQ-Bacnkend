@@ -25,3 +25,17 @@ export const loginSchema = z.object({
 export const googleAuthSchema = z.object({
     idToken: z.string().min(1, "Google ID token is required"),
 });
+
+export const requestRegistrationOtpSchema = registerSchema;
+
+export const verifyRegistrationOtpSchema = z.object({
+    email: z
+        .string()
+        .trim()
+        .email("Invalid email address")
+        .transform((value) => value.toLowerCase()),
+    code: z
+        .string()
+        .length(6, "Code must be 6 digits")
+        .regex(/^\d{6}$/, "Code must be 6 digits"),
+});
