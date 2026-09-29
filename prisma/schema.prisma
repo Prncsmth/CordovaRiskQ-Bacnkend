@@ -36,6 +36,18 @@ model User {
   notifications      Notification[]
 }
 
+model PendingRegistration {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  otpHash      String
+  otpExpiresAt DateTime
+  attempts     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 model SosAlert {
   id        String   @id @default(uuid())
   userId    String
