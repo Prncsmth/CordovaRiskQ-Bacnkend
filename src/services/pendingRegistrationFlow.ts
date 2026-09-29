@@ -85,6 +85,14 @@ export async function requestRegistrationOtp(
     const otpHash = await deps.hash(code);
     const otpExpiresAt = new Date(deps.now().getTime() + OTP_EXPIRY_MS);
 
+    // Send BEFORE persisting: if sendOtpEmail throws, we must not leave a
+    // pending row (and thus a fresh otpExpiresAt / resend cooldown) behind
+    // for a code that was never actually delivered. Not caught here -- a
+    // send failure propagates to the caller (see Global Constraints:
+    // request-otp must never look like it succeeded when the email never
+    // went out).
+    await deps.sendOtpEmail(email, code);
+
     await deps.pendingStore.upsert({
         email,
         name: input.name?.trim() || null,
@@ -93,11 +101,6 @@ export async function requestRegistrationOtp(
         otpExpiresAt,
         attempts: 0,
     });
-
-    // Not caught here -- a send failure propagates to the caller (see
-    // Global Constraints: request-otp must never look like it succeeded
-    // when the email never went out).
-    await deps.sendOtpEmail(email, code);
 }
 
 export async function verifyRegistrationOtp(

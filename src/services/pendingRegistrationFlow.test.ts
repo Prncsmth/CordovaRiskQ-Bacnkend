@@ -187,7 +187,7 @@ test("requestRegistrationOtp allows an immediate resend once the previous code h
 });
 
 test("requestRegistrationOtp propagates a send failure without leaving a false-success response", async () => {
-    const { deps } = createFakeDeps({
+    const { deps, pendingRows } = createFakeDeps({
         sendOtpEmail: async () => {
             throw Object.assign(new Error("send failed"), { statusCode: 502 });
         },
@@ -200,6 +200,72 @@ test("requestRegistrationOtp propagates a send failure without leaving a false-s
             return true;
         },
     );
+
+    // A first-ever send failure must not leave a pending row behind --
+    // otherwise a cooldown/otpHash would exist for a code that was never
+    // delivered.
+    assert.equal(pendingRows.size, 0);
+});
+
+test("requestRegistrationOtp allows an immediate retry after a send failure on a fresh registration (no false cooldown)", async () => {
+    let calls = 0;
+    const { deps, pendingRows, sentEmails } = createFakeDeps({
+        sendOtpEmail: async (to, code) => {
+            calls += 1;
+            if (calls === 1) {
+                throw Object.assign(new Error("send failed"), { statusCode: 502 });
+            }
+            sentEmails.push({ to, code });
+        },
+    });
+
+    await assert.rejects(
+        () => requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps),
+        (err: any) => {
+            assert.equal(err.statusCode, 502);
+            return true;
+        },
+    );
+
+    // Immediate retry -- must not be rejected with 429, since no cooldown
+    // was ever established (the failed send never persisted a row).
+    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
+
+    assert.equal(calls, 2);
+    assert.equal(pendingRows.size, 1);
+});
+
+test("requestRegistrationOtp leaves the original pending row untouched when a resend's send fails", async () => {
+    let calls = 0;
+    const { deps, pendingRows, advanceClock } = createFakeDeps({
+        sendOtpEmail: async (to, code) => {
+            calls += 1;
+            if (calls === 1) {
+                return; // initial request succeeds
+            }
+            throw Object.assign(new Error("send failed"), { statusCode: 502 });
+        },
+    });
+
+    // Initial successful request establishes a valid, unexpired pending row.
+    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
+    const original = { ...pendingRows.get("juana@gmail.com")! };
+
+    // Past the cooldown, so a resend is attempted -- but its send fails.
+    advanceClock(60_000);
+    await assert.rejects(
+        () => requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps),
+        (err: any) => {
+            assert.equal(err.statusCode, 502);
+            return true;
+        },
+    );
+
+    // The original row (old code, old cooldown timing) must remain intact --
+    // the failed resend must not silently overwrite it.
+    const after = pendingRows.get("juana@gmail.com")!;
+    assert.equal(after.otpHash, original.otpHash);
+    assert.equal(after.otpExpiresAt.getTime(), original.otpExpiresAt.getTime());
 });
 
 test("verifyRegistrationOtp creates the User and deletes the pending row on a correct code", async () => {
