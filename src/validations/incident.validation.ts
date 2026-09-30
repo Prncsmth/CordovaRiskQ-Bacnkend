@@ -8,6 +8,7 @@ export const createIncidentSchema = z.object({
     longitude: z.number(),
     reporterLatitude: z.number(),
     reporterLongitude: z.number(),
+    markedUrgent: z.boolean().optional(),
 });
 
 export const updateIncidentStatusSchema = z.object({
