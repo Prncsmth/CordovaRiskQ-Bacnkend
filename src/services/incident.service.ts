@@ -12,14 +12,7 @@ import {
 } from "@/services/incidentRoster";
 import { canCancelIncident, canViewIncident } from "@/services/incidentAuthorization";
 import { emitAdminActivity, emitAdminIncidentUpdate } from "@/realtime/emit";
-
-const URGENCY_BY_CATEGORY: Record<string, string> = {
-    fire: "high",
-    medical: "high",
-    flood: "medium",
-    "road-accident": "medium",
-    other: "low",
-};
+import { resolveUrgency } from "@/services/incidentUrgency";
 
 export const NON_TERMINAL_STATUSES =["pending", "lobby", "on_the_way", "arrived"];
 
@@ -211,6 +204,7 @@ export const incidentService = {
             locationLabel: string;
             latitude: number;
             longitude: number;
+            markedUrgent?: boolean;
         }
     ) {
         const incident = await prisma.incident.create({
@@ -222,7 +216,7 @@ export const incidentService = {
                 locationLabel: data.locationLabel,
                 latitude: data.latitude,
                 longitude: data.longitude,
-                urgency: URGENCY_BY_CATEGORY[data.category] ?? "low",
+                urgency: resolveUrgency(data.category, data.markedUrgent),
             },
         });
         await notificationService.createForAllResponders({
