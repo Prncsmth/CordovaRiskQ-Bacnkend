@@ -5,3 +5,7 @@ export const triggerSosSchema = z.object({
     longitude: z.number(),
     locationLabel: z.string().optional(),
 });
+
+export const closeSosAlertSchema = z.object({
+    outcome: z.enum(["resolved", "dismissed"]),
+});

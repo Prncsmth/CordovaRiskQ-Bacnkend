@@ -2,7 +2,17 @@ import { prisma, type DbTransactionClient } from "@/lib/prisma";
 import type { Incident } from "@/generated/prisma/client";
 import { incidentService, NON_TERMINAL_STATUSES } from "@/services/incident.service";
 import { emitAdminActivity } from "@/realtime/emit";
-import { type AlertStatus, countAlertsByStatus, filterAlertIdsByStatus } from "@/services/sosAlertStatus";
+import {
+    type AdminCloseOutcome,
+    type AlertStatus,
+    adminCloseOutcomeToIncidentStatus,
+    countAlertsByStatus,
+    deriveAlertStatus,
+    filterAlertIdsByStatus,
+    incidentStatusToAlertOutcome,
+} from "@/services/sosAlertStatus";
+import { sosExpiryMs } from "@/lib/sosExpiryPolling";
+import { AppError } from "@/utils/AppError";
 import { type SosStore, type SosTriggerInput, triggerSos } from "@/services/sosTrigger";
 
 function createSosStore(tx: DbTransactionClient): SosStore<Incident> {
@@ -89,7 +99,11 @@ export const sosService = {
                 emitAdminActivity({
                     type: "sos_alert",
                     title: "New SOS alert received",
-                    detail: input.locationLabel ?? "Location unavailable",
+                    // Same source GET /admin/activity reads (the linked
+                    // incident's label, "SOS Alert" when no location was
+                    // given) -- the admin panel keys read state on detail, so
+                    // the two must match or a read alert returns unread.
+                    detail: incident?.locationLabel ?? "Location unavailable",
                     occurredAt: alert.createdAt.toISOString(),
                 });
                 if (incident) incidentService.announceSosIncident(incident);
@@ -138,10 +152,13 @@ export const sosService = {
             );
         }
 
+        const now = new Date();
+        const expiryMs = sosExpiryMs();
+
         let statusAlertIds: string[] | undefined;
         if (filters.alertStatus) {
             const [allAlerts, linkedIncidents] = await Promise.all([
-                prisma.sosAlert.findMany({ select: { id: true } }),
+                prisma.sosAlert.findMany({ select: { id: true, status: true, createdAt: true } }),
                 prisma.incident.findMany({
                     where: { sosAlertId: { not: null } },
                     select: { sosAlertId: true, status: true },
@@ -151,9 +168,11 @@ export const sosService = {
                 linkedIncidents.map((i) => [i.sosAlertId as string, i.status]),
             );
             statusAlertIds = filterAlertIdsByStatus(
-                allAlerts.map((a) => a.id),
+                allAlerts,
                 incidentStatusByAlertId,
                 filters.alertStatus,
+                now,
+                expiryMs,
             );
         }
 
@@ -209,6 +228,7 @@ export const sosService = {
                     reporter: { id: alert.userId, name: alert.user.name, mobile: alert.user.mobile },
                     incidentId: incident?.id ?? null,
                     incidentStatus: incident?.status ?? null,
+                    alertStatus: deriveAlertStatus(alert, incident?.status, now, expiryMs),
                 };
             }),
             total,
@@ -219,7 +239,7 @@ export const sosService = {
 
     async getAdminSummary() {
         const [allAlerts, linkedIncidents] = await Promise.all([
-            prisma.sosAlert.findMany({ select: { id: true } }),
+            prisma.sosAlert.findMany({ select: { id: true, status: true, createdAt: true } }),
             prisma.incident.findMany({
                 where: { sosAlertId: { not: null } },
                 select: { sosAlertId: true, status: true },
@@ -228,6 +248,31 @@ export const sosService = {
         const incidentStatusByAlertId = new Map(
             linkedIncidents.map((i) => [i.sosAlertId as string, i.status]),
         );
-        return countAlertsByStatus(allAlerts.map((a) => a.id), incidentStatusByAlertId);
+        return countAlertsByStatus(allAlerts, incidentStatusByAlertId, new Date(), sosExpiryMs());
+    },
+
+    async closeForAdmin(sosAlertId: string, outcome: AdminCloseOutcome) {
+        const incidentStatus = adminCloseOutcomeToIncidentStatus(outcome);
+        const linked = await prisma.incident.findFirst({ where: { sosAlertId }, select: { id: true } });
+
+        if (linked) {
+            const incident = await incidentService.closeSosByAdmin(sosAlertId, incidentStatus);
+            return { id: sosAlertId, incidentId: incident.id, incidentStatus: incident.status };
+        }
+
+        // No incident to close (see sosAlertStatus.ts's ORPHAN_ALERT_STATUS) --
+        // record the outcome on the alert itself. Only an alert with no outcome
+        // yet ("active") can be closed.
+        const { count } = await prisma.sosAlert.updateMany({
+            where: { id: sosAlertId, status: "active" },
+            data: { status: incidentStatusToAlertOutcome(incidentStatus) },
+        });
+        if (count === 0) {
+            const exists = await prisma.sosAlert.findUnique({ where: { id: sosAlertId }, select: { id: true } });
+            throw exists
+                ? new AppError("This SOS alert is already closed", 409)
+                : new AppError("SOS alert not found", 404);
+        }
+        return { id: sosAlertId, incidentId: null, incidentStatus: null };
     },
 };

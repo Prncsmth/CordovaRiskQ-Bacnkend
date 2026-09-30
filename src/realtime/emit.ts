@@ -161,3 +161,22 @@ export interface AdminResponderDutyPayload {
 export function emitAdminResponderDutyChanged(payload: AdminResponderDutyPayload): void {
     ioInstance?.to("admin").emit("admin:responderDutyChanged", payload);
 }
+
+// Pushed to the "admin" room when a citizen or responder sends a Contact
+// Support request (kind "created") or an admin changes one's status ("updated") -- the admin
+// Support Requests page refetches on it so a new request appears the moment
+// it is sent. GET /admin/support-requests supplies the initial load.
+export interface AdminSupportRequestPayload {
+    kind: "created" | "updated";
+    id: string;
+    topic: string;
+    subject: string | null;
+    status: string;
+    userName: string | null;
+    // "citizen" | "responder" -- who sent it (User.role).
+    userRole: string;
+}
+
+export function emitAdminSupportRequest(payload: AdminSupportRequestPayload): void {
+    ioInstance?.to("admin").emit("admin:supportRequest", payload);
+}

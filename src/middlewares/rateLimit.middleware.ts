@@ -47,3 +47,9 @@ export const verifyOtpLimiter = createRateLimiter(
     10,
     "Too many attempts. Please try again in a few minutes."
 );
+
+export const supportRequestLimiter = createRateLimiter(
+    60 * 60 * 1000,
+    10,
+    "Too many support requests sent recently. Please wait a while before sending another."
+);
