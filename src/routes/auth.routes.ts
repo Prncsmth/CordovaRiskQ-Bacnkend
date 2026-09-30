@@ -3,31 +3,33 @@ import { authController } from "@/controllers/auth.controller";
 import { validate } from "@/middlewares/validate.middleware";
 import {
     loginLimiter,
-    registerLimiter,
     requestOtpLimiter,
     verifyOtpLimiter,
 } from "@/middlewares/rateLimit.middleware";
 import {
-    registerSchema,
     loginSchema,
     googleAuthSchema,
     requestRegistrationOtpSchema,
+    resendRegistrationOtpSchema,
     verifyRegistrationOtpSchema,
 } from "@/validations/auth.validation";
 
 const router = Router();
 
-router.post(
-    "/auth/register",
-    registerLimiter,
-    validate(registerSchema),
-    authController.register
-);
+// Registration requires the emailed 6-digit code -- there is no route that
+// creates an account without it.
 router.post(
     "/auth/register/request-otp",
     requestOtpLimiter,
     validate(requestRegistrationOtpSchema),
     authController.requestRegistrationOtp
+);
+// Shares request-otp's limiter: both send an email.
+router.post(
+    "/auth/register/resend-otp",
+    requestOtpLimiter,
+    validate(resendRegistrationOtpSchema),
+    authController.resendRegistrationOtp
 );
 router.post(
     "/auth/register/verify-otp",

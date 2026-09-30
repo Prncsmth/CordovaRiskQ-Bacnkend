@@ -4,16 +4,17 @@ import { pendingRegistrationService } from "@/services/pendingRegistration.servi
 import { asyncHandler } from "@/utils/asyncHandler";
 
 export const authController = {
-    register: asyncHandler(async (req: Request, res: Response) => {
-        const { email, password, name } = req.body;
-        const result = await authService.register(email, password, name);
-        res.status(201).json({ success: true, ...result });
-    }),
-
     requestRegistrationOtp: asyncHandler(async (req: Request, res: Response) => {
         const { name, email, password } = req.body;
-        await pendingRegistrationService.requestOtp({ name, email, password });
-        res.status(200).json({ success: true });
+        // Never includes the code -- only the email carries it.
+        const result = await pendingRegistrationService.requestOtp({ name, email, password });
+        res.status(200).json({ success: true, ...result });
+    }),
+
+    resendRegistrationOtp: asyncHandler(async (req: Request, res: Response) => {
+        const { email } = req.body;
+        const result = await pendingRegistrationService.resendOtp({ email });
+        res.status(200).json({ success: true, ...result });
     }),
 
     verifyRegistrationOtp: asyncHandler(async (req: Request, res: Response) => {

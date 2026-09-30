@@ -1,5 +1,5 @@
 // src/services/pendingRegistration.service.ts
-// Real Prisma + Resend wiring for pendingRegistrationFlow.ts's pure logic --
+// Real Prisma + SMTP wiring for pendingRegistrationFlow.ts's pure logic --
 // mirrors sos.service.ts's role relative to sosTrigger.ts.
 import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
@@ -7,7 +7,9 @@ import { emitAdminActivity } from "@/realtime/emit";
 import { signToken } from "@/utils/jwt";
 import { sendOtpEmail } from "@/services/email.service";
 import {
+    loadOtpConfig,
     requestRegistrationOtp,
+    resendRegistrationOtp,
     verifyRegistrationOtp,
     type PendingRegistrationStore,
     type RegistrationOtpDeps,
@@ -28,23 +30,17 @@ const pendingStore: PendingRegistrationStore = {
         };
     },
     async upsert(row) {
+        const data = {
+            name: row.name,
+            passwordHash: row.passwordHash,
+            otpHash: row.otpHash,
+            otpExpiresAt: row.otpExpiresAt,
+            attempts: row.attempts,
+        };
         await prisma.pendingRegistration.upsert({
             where: { email: row.email },
-            create: {
-                email: row.email,
-                name: row.name,
-                passwordHash: row.passwordHash,
-                otpHash: row.otpHash,
-                otpExpiresAt: row.otpExpiresAt,
-                attempts: row.attempts,
-            },
-            update: {
-                name: row.name,
-                passwordHash: row.passwordHash,
-                otpHash: row.otpHash,
-                otpExpiresAt: row.otpExpiresAt,
-                attempts: row.attempts,
-            },
+            create: { email: row.email, ...data },
+            update: data,
         });
     },
     async incrementAttempts(email) {
@@ -53,16 +49,18 @@ const pendingStore: PendingRegistrationStore = {
             data: { attempts: { increment: 1 } },
         });
     },
-    async delete(email) {
-        await prisma.pendingRegistration.delete({ where: { email } }).catch(() => {});
+    async consume(email) {
+        // deleteMany reports how many rows it removed, so of two concurrent
+        // requests with the same correct code only one sees count === 1.
+        const { count } = await prisma.pendingRegistration.deleteMany({ where: { email } });
+        return count === 1;
     },
 };
 
 const userStore: UserStore = {
     async findByEmail(email) {
-        // Case-insensitive, matching authService.register/updateProfile's
-        // existing convention -- email here is already lowercased by
-        // pendingRegistrationFlow before this is called, but a defensive
+        // Case-insensitive, matching authService.login's lookup -- email is
+        // already lowercased by pendingRegistrationFlow, but a defensive
         // insensitive match costs nothing and stays consistent.
         const user = await prisma.user.findFirst({
             where: { email: { equals: email, mode: "insensitive" } },
@@ -90,10 +88,11 @@ const deps: RegistrationOtpDeps = {
     userStore,
     hash: (value) => bcrypt.hash(value, 10),
     compareHash: (value, hash) => bcrypt.compare(value, hash),
-    sendOtpEmail,
+    sendOtpEmail: (to, code, expiryMinutes) => sendOtpEmail(to, code, expiryMinutes),
     now: () => new Date(),
+    // Read once at startup; restart the server after changing OTP_* values.
+    config: loadOtpConfig(),
     onUserCreated: (user) => {
-        // Same event authService.register emits today on direct-create.
         emitAdminActivity({
             type: "user_registered",
             title: "New user registered",
@@ -108,12 +107,19 @@ export const pendingRegistrationService = {
         return requestRegistrationOtp(input, deps);
     },
 
+    resendOtp(input: { email: string }) {
+        return resendRegistrationOtp(input, deps);
+    },
+
     async verifyOtp(input: { email: string; code: string }) {
         const user = await verifyRegistrationOtp(input, deps);
         const token = signToken({ userId: user.id });
         return {
             user: { id: user.id, email: user.email, name: user.name, role: user.role, isOnDuty: user.isOnDuty },
             token,
+            // Always a brand-new account -- drives the phone-number/Terms
+            // onboarding in the app.
+            isNewUser: true,
         };
     },
 };

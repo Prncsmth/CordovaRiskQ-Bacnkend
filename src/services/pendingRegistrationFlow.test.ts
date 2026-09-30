@@ -1,68 +1,80 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
+import { test, type TestContext } from "node:test";
 
+import { AppError } from "@/utils/AppError";
 import {
+    DEFAULT_OTP_CONFIG,
+    loadOtpConfig,
     requestRegistrationOtp,
+    resendRegistrationOtp,
     verifyRegistrationOtp,
+    type CreatedUser,
     type PendingRegistrationRow,
     type RegistrationOtpDeps,
 } from "@/services/pendingRegistrationFlow";
 
 const TEN_MINUTES = 10 * 60 * 1000;
+const START = new Date("2026-09-30T03:00:00.000Z");
+
+type StoredUser = CreatedUser & { password: string };
 
 function createFakeDeps(overrides: Partial<RegistrationOtpDeps> = {}) {
     const pendingRows = new Map<string, PendingRegistrationRow>();
-    const users = new Map<string, { id: string; email: string; name: string | null; role: string; isOnDuty: boolean; createdAt: Date }>();
-    const sentEmails: { to: string; code: string }[] = [];
-    const createdEvents: { id: string; email: string; name: string | null; createdAt: Date }[] = [];
-    let clock = new Date("2026-09-29T03:00:00.000Z");
+    const users: StoredUser[] = [];
+    const sentEmails: { to: string; code: string; expiryMinutes: number }[] = [];
+    const createdEvents: CreatedUser[] = [];
+    const hashedValues: string[] = [];
+    let clock = START;
     let userSeq = 0;
 
     const deps: RegistrationOtpDeps = {
         pendingStore: {
             async findByEmail(email) {
-                return pendingRows.get(email) ?? null;
+                const row = pendingRows.get(email);
+                return row ? { ...row } : null;
             },
             async upsert(row) {
-                pendingRows.set(row.email, row);
+                pendingRows.set(row.email, { ...row });
             },
             async incrementAttempts(email) {
                 const row = pendingRows.get(email);
                 if (row) row.attempts += 1;
             },
-            async delete(email) {
-                pendingRows.delete(email);
+            async consume(email) {
+                return pendingRows.delete(email);
             },
         },
         userStore: {
             async findByEmail(email) {
-                for (const user of users.values()) {
-                    if (user.email === email) return { id: user.id };
-                }
-                return null;
+                const user = users.find((u) => u.email === email);
+                return user ? { id: user.id } : null;
             },
             async create(data) {
-                const user = {
+                const user: StoredUser = {
                     id: `user-${++userSeq}`,
                     email: data.email,
                     name: data.name,
                     role: "citizen",
                     isOnDuty: true,
                     createdAt: clock,
+                    password: data.passwordHash,
                 };
-                users.set(user.id, user);
+                users.push(user);
                 return user;
             },
         },
-        // Fake "hash" is reversible on purpose (`hashed:${value}`) so
-        // compareHash below can check equality without real bcrypt --
-        // real bcrypt is exercised in Task 3's wiring, not here.
-        hash: async (value) => `hashed:${value}`,
+        // Reversible fake "hash" so compareHash can check equality without
+        // real bcrypt; stored values are still never the plain input.
+        hash: async (value) => {
+            hashedValues.push(value);
+            return `hashed:${value}`;
+        },
         compareHash: async (value, hash) => `hashed:${value}` === hash,
-        sendOtpEmail: overrides.sendOtpEmail ?? (async (to, code) => {
-            sentEmails.push({ to, code });
-        }),
+        async sendOtpEmail(to, code, expiryMinutes) {
+            sentEmails.push({ to, code, expiryMinutes });
+        },
         now: () => clock,
+        config: DEFAULT_OTP_CONFIG,
         onUserCreated: (user) => {
             createdEvents.push(user);
         },
@@ -75,272 +87,375 @@ function createFakeDeps(overrides: Partial<RegistrationOtpDeps> = {}) {
         users,
         sentEmails,
         createdEvents,
+        hashedValues,
         advanceClock(ms: number) {
             clock = new Date(clock.getTime() + ms);
         },
-        setClock(date: Date) {
-            clock = date;
+        lastCode() {
+            return sentEmails[sentEmails.length - 1].code;
+        },
+        addUser(email: string) {
+            users.push({ id: `existing-${users.length}`, email, name: null, role: "citizen", isOnDuty: true, createdAt: clock, password: "x" });
         },
     };
 }
 
-test("requestRegistrationOtp creates a pending row and sends the code", async () => {
+const REGISTRATION = { name: " Juana ", email: " Juana@Example.com ", password: "secret123" };
+
+function wrongCodeFor(code: string): string {
+    return code === "000000" ? "111111" : "000000";
+}
+
+async function rejectsWithStatus(promise: Promise<unknown>, statusCode: number, message?: RegExp) {
+    await assert.rejects(promise, (err: unknown) => {
+        assert.ok(err instanceof AppError, `expected AppError, got ${String(err)}`);
+        assert.equal(err.statusCode, statusCode);
+        if (message) assert.match(err.message, message);
+        return true;
+    });
+}
+
+// Captures everything written to the console during a test.
+function captureConsole(t: TestContext) {
+    const lines: string[] = [];
+    for (const method of ["log", "info", "warn", "error", "debug"] as const) {
+        t.mock.method(console, method, (...args: unknown[]) => {
+            lines.push(args.map((a) => (a instanceof Error ? `${a.message} ${a.stack}` : String(a))).join(" "));
+        });
+    }
+    return lines;
+}
+
+// --- configuration ---------------------------------------------------------
+
+test("loadOtpConfig defaults to 10 minutes / 60 seconds / 5 attempts", () => {
+    assert.deepEqual(loadOtpConfig({}), { expiryMs: TEN_MINUTES, resendCooldownMs: 60_000, maxAttempts: 5 });
+});
+
+test("loadOtpConfig reads OTP_EXPIRY_MINUTES, OTP_RESEND_COOLDOWN_SECONDS and OTP_MAX_ATTEMPTS", () => {
+    assert.deepEqual(
+        loadOtpConfig({ OTP_EXPIRY_MINUTES: "15", OTP_RESEND_COOLDOWN_SECONDS: "90", OTP_MAX_ATTEMPTS: "3" }),
+        { expiryMs: 15 * 60_000, resendCooldownMs: 90_000, maxAttempts: 3 },
+    );
+});
+
+test("loadOtpConfig falls back to safe defaults for zero, negative or non-numeric values", () => {
+    assert.deepEqual(
+        loadOtpConfig({ OTP_EXPIRY_MINUTES: "0", OTP_RESEND_COOLDOWN_SECONDS: "-5", OTP_MAX_ATTEMPTS: "lots" }),
+        DEFAULT_OTP_CONFIG,
+    );
+});
+
+// --- request-otp -----------------------------------------------------------
+
+test("request-otp emails a 6-digit code and stores only hashes of the code and password", async () => {
     const { deps, pendingRows, sentEmails } = createFakeDeps();
 
-    await requestRegistrationOtp({ name: "Juana", email: "juana@gmail.com", password: "secret123" }, deps);
+    await requestRegistrationOtp(REGISTRATION, deps);
 
-    assert.equal(pendingRows.size, 1);
-    const row = pendingRows.get("juana@gmail.com")!;
-    assert.equal(row.attempts, 0);
-    assert.equal(row.passwordHash, "hashed:secret123");
     assert.equal(sentEmails.length, 1);
-    assert.equal(sentEmails[0].to, "juana@gmail.com");
+    assert.equal(sentEmails[0].to, "juana@example.com");
+    assert.match(sentEmails[0].code, /^\d{6}$/);
+    assert.equal(sentEmails[0].expiryMinutes, 10);
+
+    const row = pendingRows.get("juana@example.com")!;
+    assert.equal(row.name, "Juana");
+    assert.equal(row.attempts, 0);
+    assert.equal(row.otpExpiresAt.getTime() - START.getTime(), TEN_MINUTES);
+    assert.equal(row.passwordHash, "hashed:secret123");
+    assert.notEqual(row.passwordHash, "secret123", "the plain password must never be stored");
     assert.equal(row.otpHash, `hashed:${sentEmails[0].code}`);
-    assert.equal(row.otpExpiresAt.getTime(), new Date("2026-09-29T03:10:00.000Z").getTime());
+    assert.notEqual(row.otpHash, sentEmails[0].code, "the plain code must never be stored");
 });
 
-test("requestRegistrationOtp rejects an email that already belongs to a real User", async () => {
-    const { deps } = createFakeDeps();
-    await deps.userStore.create({ email: "existing@gmail.com", name: "Existing", passwordHash: "x" });
+test("request-otp never returns the code or the password -- only the resend cooldown", async () => {
+    const { deps, sentEmails } = createFakeDeps();
 
-    await assert.rejects(
-        () => requestRegistrationOtp({ email: "existing@gmail.com", password: "secret123" }, deps),
-        (err: any) => {
-            assert.equal(err.statusCode, 409);
-            return true;
-        },
-    );
+    const response = await requestRegistrationOtp(REGISTRATION, deps);
+
+    assert.deepEqual(response, { resendCooldownSeconds: 60 });
+    const serialized = JSON.stringify(response);
+    assert.ok(!serialized.includes(sentEmails[0].code));
+    assert.ok(!serialized.includes("secret123"));
 });
 
-test("requestRegistrationOtp blocks a resend within 60 seconds of the code actually being sent", async () => {
-    const { deps, advanceClock } = createFakeDeps();
+test("request-otp generates codes with crypto, never Math.random", async (t) => {
+    const mathRandom = t.mock.method(Math, "random");
+    const codes = new Set<string>();
 
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
-    advanceClock(20_000); // 20s later
+    for (let i = 0; i < 20; i++) {
+        const { deps, lastCode } = createFakeDeps();
+        await requestRegistrationOtp(REGISTRATION, deps);
+        assert.match(lastCode(), /^\d{6}$/);
+        codes.add(lastCode());
+    }
 
-    await assert.rejects(
-        () => requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps),
-        (err: any) => {
-            assert.equal(err.statusCode, 429);
-            return true;
-        },
-    );
+    assert.equal(mathRandom.mock.callCount(), 0);
+    assert.ok(codes.size > 1, "codes must vary between requests");
 });
 
-test("requestRegistrationOtp allows a resend once 60 seconds have passed", async () => {
-    const { deps, advanceClock, sentEmails } = createFakeDeps();
+test("request-otp never logs the code or the password", async (t) => {
+    const lines = captureConsole(t);
+    const { deps, lastCode } = createFakeDeps();
 
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
-    advanceClock(60_000);
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
+    await requestRegistrationOtp(REGISTRATION, deps);
 
-    assert.equal(sentEmails.length, 2);
+    assert.ok(!lines.some((line) => line.includes(lastCode()) || line.includes("secret123")));
 });
 
-test("a failed verify attempt does not itself extend the resend cooldown (the updatedAt bug from spec review)", async () => {
-    const { deps, advanceClock } = createFakeDeps();
+test("request-otp rejects an email that already belongs to a User, without sending anything", async () => {
+    const { deps, sentEmails, pendingRows, addUser } = createFakeDeps();
+    addUser("juana@example.com");
 
-    // 3:00:00 -- code requested
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
-
-    // 3:00:10 -- wrong guess
-    advanceClock(10_000);
-    await assert.rejects(() => verifyRegistrationOtp({ email: "juana@gmail.com", code: "000000" }, deps));
-
-    // 3:00:20 -- resend: only 20s have passed since the code was actually
-    // sent at 3:00:00, so this must still be blocked (not measured from
-    // the 3:00:10 typo, which would otherwise push the block out further).
-    advanceClock(10_000);
-    await assert.rejects(
-        () => requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps),
-        (err: any) => {
-            assert.equal(err.statusCode, 429);
-            return true;
-        },
-    );
-
-    // 3:01:00 -- exactly 60s since the ORIGINAL send: must now be allowed.
-    advanceClock(40_000);
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps); // must not throw
-});
-
-test("requestRegistrationOtp resets attempts to 0 on a resend", async () => {
-    const { deps, pendingRows, advanceClock } = createFakeDeps();
-
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
-    await assert.rejects(() => verifyRegistrationOtp({ email: "juana@gmail.com", code: "000000" }, deps));
-    assert.equal(pendingRows.get("juana@gmail.com")!.attempts, 1);
-
-    advanceClock(60_000);
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
-
-    assert.equal(pendingRows.get("juana@gmail.com")!.attempts, 0);
-});
-
-test("requestRegistrationOtp allows an immediate resend once the previous code has expired", async () => {
-    const { deps, advanceClock } = createFakeDeps();
-
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
-    advanceClock(TEN_MINUTES + 1000); // just past expiry -- also long past the 60s cooldown
-
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps); // must not throw
-});
-
-test("requestRegistrationOtp propagates a send failure without leaving a false-success response", async () => {
-    const { deps, pendingRows } = createFakeDeps({
-        sendOtpEmail: async () => {
-            throw Object.assign(new Error("send failed"), { statusCode: 502 });
-        },
-    });
-
-    await assert.rejects(
-        () => requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps),
-        (err: any) => {
-            assert.equal(err.statusCode, 502);
-            return true;
-        },
-    );
-
-    // A first-ever send failure must not leave a pending row behind --
-    // otherwise a cooldown/otpHash would exist for a code that was never
-    // delivered.
+    await rejectsWithStatus(requestRegistrationOtp(REGISTRATION, deps), 409, /Email already registered/);
+    assert.equal(sentEmails.length, 0);
     assert.equal(pendingRows.size, 0);
 });
 
-test("requestRegistrationOtp allows an immediate retry after a send failure on a fresh registration (no false cooldown)", async () => {
-    let calls = 0;
+test("request-otp enforces the resend cooldown server-side", async () => {
+    const { deps, sentEmails, advanceClock } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+
+    advanceClock(30_000);
+    await rejectsWithStatus(requestRegistrationOtp(REGISTRATION, deps), 429);
+    assert.equal(sentEmails.length, 1, "no email may be sent during the cooldown");
+
+    advanceClock(30_000);
+    await requestRegistrationOtp(REGISTRATION, deps);
+    assert.equal(sentEmails.length, 2);
+});
+
+test("request-otp allows an immediate new request once the previous code has expired", async () => {
+    const { deps, sentEmails, advanceClock } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+    advanceClock(TEN_MINUTES + 1);
+    await requestRegistrationOtp(REGISTRATION, deps);
+    assert.equal(sentEmails.length, 2);
+});
+
+test("request-otp sends before saving: a send failure leaves no pending row and no cooldown", async () => {
+    let fail = true;
     const { deps, pendingRows, sentEmails } = createFakeDeps({
-        sendOtpEmail: async (to, code) => {
-            calls += 1;
-            if (calls === 1) {
-                throw Object.assign(new Error("send failed"), { statusCode: 502 });
-            }
-            sentEmails.push({ to, code });
+        async sendOtpEmail(to, code, expiryMinutes) {
+            if (fail) throw new AppError("Couldn't send the verification email. Please try again.", 502);
+            sentEmails.push({ to, code, expiryMinutes });
         },
     });
 
-    await assert.rejects(
-        () => requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps),
-        (err: any) => {
-            assert.equal(err.statusCode, 502);
-            return true;
-        },
-    );
+    await rejectsWithStatus(requestRegistrationOtp(REGISTRATION, deps), 502);
+    assert.equal(pendingRows.size, 0);
 
-    // Immediate retry -- must not be rejected with 429, since no cooldown
-    // was ever established (the failed send never persisted a row).
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
-
-    assert.equal(calls, 2);
-    assert.equal(pendingRows.size, 1);
+    fail = false;
+    await requestRegistrationOtp(REGISTRATION, deps); // no false cooldown
+    assert.equal(sentEmails.length, 1);
 });
 
-test("requestRegistrationOtp leaves the original pending row untouched when a resend's send fails", async () => {
-    let calls = 0;
-    const { deps, pendingRows, advanceClock } = createFakeDeps({
-        sendOtpEmail: async (to, code) => {
-            calls += 1;
-            if (calls === 1) {
-                return; // initial request succeeds
-            }
-            throw Object.assign(new Error("send failed"), { statusCode: 502 });
-        },
-    });
+// --- resend-otp ------------------------------------------------------------
 
-    // Initial successful request establishes a valid, unexpired pending row.
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
-    const original = { ...pendingRows.get("juana@gmail.com")! };
+test("resend-otp needs only the email and reuses the stored password hash", async () => {
+    const { deps, pendingRows, sentEmails, hashedValues, advanceClock } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+    const passwordHashBefore = pendingRows.get("juana@example.com")!.passwordHash;
+    const hashedBefore = hashedValues.length;
 
-    // Past the cooldown, so a resend is attempted -- but its send fails.
     advanceClock(60_000);
-    await assert.rejects(
-        () => requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps),
-        (err: any) => {
-            assert.equal(err.statusCode, 502);
-            return true;
-        },
-    );
+    const response = await resendRegistrationOtp({ email: " JUANA@example.com " }, deps);
 
-    // The original row (old code, old cooldown timing) must remain intact --
-    // the failed resend must not silently overwrite it.
-    const after = pendingRows.get("juana@gmail.com")!;
-    assert.equal(after.otpHash, original.otpHash);
-    assert.equal(after.otpExpiresAt.getTime(), original.otpExpiresAt.getTime());
+    assert.deepEqual(response, { resendCooldownSeconds: 60 });
+    assert.equal(sentEmails.length, 2);
+    assert.equal(pendingRows.get("juana@example.com")!.passwordHash, passwordHashBefore);
+    // Only the new code was hashed -- no password was involved.
+    assert.equal(hashedValues.length, hashedBefore + 1);
+    assert.equal(hashedValues[hashedValues.length - 1], sentEmails[1].code);
 });
 
-test("verifyRegistrationOtp creates the User and deletes the pending row on a correct code", async () => {
-    const { deps, pendingRows, sentEmails, createdEvents } = createFakeDeps();
+test("resend-otp issues a new code, invalidates the old one and resets attempts", async () => {
+    const { deps, pendingRows, advanceClock, lastCode } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+    const oldCode = lastCode();
+    await assert.rejects(verifyRegistrationOtp({ email: "juana@example.com", code: wrongCodeFor(oldCode) }, deps));
+    assert.equal(pendingRows.get("juana@example.com")!.attempts, 1);
 
-    await requestRegistrationOtp({ name: "Juana", email: "juana@gmail.com", password: "secret123" }, deps);
-    const code = sentEmails[0].code;
+    let newCode = oldCode;
+    // Retry until the random code differs, so the old-code check is meaningful.
+    while (newCode === oldCode) {
+        advanceClock(60_000);
+        await resendRegistrationOtp({ email: "juana@example.com" }, deps);
+        newCode = lastCode();
+    }
 
-    const user = await verifyRegistrationOtp({ email: "juana@gmail.com", code }, deps);
+    assert.equal(pendingRows.get("juana@example.com")!.attempts, 0);
+    await rejectsWithStatus(verifyRegistrationOtp({ email: "juana@example.com", code: oldCode }, deps), 401);
+    const user = await verifyRegistrationOtp({ email: "juana@example.com", code: newCode }, deps);
+    assert.equal(user.email, "juana@example.com");
+});
 
-    assert.equal(user.email, "juana@gmail.com");
+test("resend-otp enforces the cooldown server-side", async () => {
+    const { deps, sentEmails, advanceClock } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+
+    advanceClock(59_000);
+    await rejectsWithStatus(resendRegistrationOtp({ email: "juana@example.com" }, deps), 429);
+    assert.equal(sentEmails.length, 1);
+});
+
+test("resend-otp honours a configured cooldown", async () => {
+    const { deps, advanceClock } = createFakeDeps({ config: { ...DEFAULT_OTP_CONFIG, resendCooldownMs: 120_000 } });
+    await requestRegistrationOtp(REGISTRATION, deps);
+    advanceClock(90_000);
+    await rejectsWithStatus(resendRegistrationOtp({ email: "juana@example.com" }, deps), 429);
+});
+
+test("a failed resend leaves the previous code working", async () => {
+    let fail = false;
+    const { deps, sentEmails, advanceClock } = createFakeDeps({
+        async sendOtpEmail(to, code, expiryMinutes) {
+            if (fail) throw new AppError("send failed", 502);
+            sentEmails.push({ to, code, expiryMinutes });
+        },
+    });
+    await requestRegistrationOtp(REGISTRATION, deps);
+    const original = sentEmails[0].code;
+
+    advanceClock(60_000);
+    fail = true;
+    await rejectsWithStatus(resendRegistrationOtp({ email: "juana@example.com" }, deps), 502);
+
+    const user = await verifyRegistrationOtp({ email: "juana@example.com", code: original }, deps);
+    assert.equal(user.email, "juana@example.com");
+});
+
+test("resend-otp rejects an email with no pending registration", async () => {
+    const { deps, sentEmails } = createFakeDeps();
+    await rejectsWithStatus(resendRegistrationOtp({ email: "nobody@example.com" }, deps), 404);
+    assert.equal(sentEmails.length, 0);
+});
+
+test("resend-otp rejects an email that has since become a registered User", async () => {
+    const { deps, sentEmails, advanceClock, addUser } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+    addUser("juana@example.com");
+    advanceClock(60_000);
+
+    await rejectsWithStatus(resendRegistrationOtp({ email: "juana@example.com" }, deps), 409);
+    assert.equal(sentEmails.length, 1);
+});
+
+test("resend-otp never logs or returns the code", async (t) => {
+    const lines = captureConsole(t);
+    const { deps, advanceClock, lastCode } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+    advanceClock(60_000);
+
+    const response = await resendRegistrationOtp({ email: "juana@example.com" }, deps);
+
+    assert.ok(!JSON.stringify(response).includes(lastCode()));
+    assert.ok(!lines.some((line) => line.includes(lastCode())));
+});
+
+// --- verify-otp ------------------------------------------------------------
+
+test("verify-otp creates the User with the stored bcrypt password hash and consumes the code", async () => {
+    const { deps, pendingRows, users, createdEvents, lastCode } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+
+    const user = await verifyRegistrationOtp({ email: "Juana@Example.com", code: lastCode() }, deps);
+
+    assert.equal(user.email, "juana@example.com");
     assert.equal(user.name, "Juana");
-    assert.equal(pendingRows.has("juana@gmail.com"), false);
+    assert.equal(users.length, 1);
+    assert.equal(users[0].password, "hashed:secret123");
+    assert.equal(pendingRows.size, 0);
     assert.equal(createdEvents.length, 1);
 });
 
-test("verifyRegistrationOtp rejects when no pending registration exists", async () => {
-    const { deps } = createFakeDeps();
+test("a used code cannot be used again", async () => {
+    const { deps, users, lastCode } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+    const code = lastCode();
 
-    await assert.rejects(
-        () => verifyRegistrationOtp({ email: "nobody@gmail.com", code: "123456" }, deps),
-        (err: any) => {
-            assert.equal(err.statusCode, 404);
-            return true;
-        },
-    );
+    await verifyRegistrationOtp({ email: "juana@example.com", code }, deps);
+    await rejectsWithStatus(verifyRegistrationOtp({ email: "juana@example.com", code }, deps), 404);
+    assert.equal(users.length, 1);
 });
 
-test("verifyRegistrationOtp rejects an expired code", async () => {
-    const { deps, advanceClock, sentEmails } = createFakeDeps();
+test("two simultaneous verifications with the correct code succeed only once", async () => {
+    const { deps, users, lastCode } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+    const code = lastCode();
 
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
-    const code = sentEmails[0].code;
-    advanceClock(TEN_MINUTES + 1000);
+    const results = await Promise.allSettled([
+        verifyRegistrationOtp({ email: "juana@example.com", code }, deps),
+        verifyRegistrationOtp({ email: "juana@example.com", code }, deps),
+    ]);
 
-    await assert.rejects(
-        () => verifyRegistrationOtp({ email: "juana@gmail.com", code }, deps),
-        (err: any) => {
-            assert.equal(err.statusCode, 410);
-            return true;
-        },
-    );
+    assert.equal(results.filter((r) => r.status === "fulfilled").length, 1);
+    assert.equal(users.length, 1);
 });
 
-test("verifyRegistrationOtp rejects a wrong code and increments attempts", async () => {
-    const { deps, pendingRows } = createFakeDeps();
+test("verify-otp rejects a wrong code with 401 and counts the attempt", async () => {
+    const { deps, pendingRows, lastCode } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
 
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
-
-    await assert.rejects(
-        () => verifyRegistrationOtp({ email: "juana@gmail.com", code: "000000" }, deps),
-        (err: any) => {
-            assert.equal(err.statusCode, 401);
-            return true;
-        },
+    await rejectsWithStatus(
+        verifyRegistrationOtp({ email: "juana@example.com", code: wrongCodeFor(lastCode()) }, deps),
+        401,
+        /Incorrect code/,
     );
-    assert.equal(pendingRows.get("juana@gmail.com")!.attempts, 1);
+    assert.equal(pendingRows.get("juana@example.com")!.attempts, 1);
 });
 
-test("verifyRegistrationOtp rejects after 5 attempts even with time remaining", async () => {
-    const { deps, sentEmails } = createFakeDeps();
+test("the attempt limit invalidates the code, even the correct one", async () => {
+    const { deps, users, lastCode } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+    const real = lastCode();
+    const wrong = wrongCodeFor(real);
 
-    await requestRegistrationOtp({ email: "juana@gmail.com", password: "secret123" }, deps);
-    const realCode = sentEmails[0].code;
-
-    for (let i = 0; i < 5; i++) {
-        await assert.rejects(() => verifyRegistrationOtp({ email: "juana@gmail.com", code: "000000" }, deps));
+    for (let i = 0; i < 4; i++) {
+        await rejectsWithStatus(verifyRegistrationOtp({ email: "juana@example.com", code: wrong }, deps), 401);
     }
+    await rejectsWithStatus(verifyRegistrationOtp({ email: "juana@example.com", code: wrong }, deps), 429, /Too many attempts/);
+    await rejectsWithStatus(verifyRegistrationOtp({ email: "juana@example.com", code: real }, deps), 429, /Too many attempts/);
+    assert.equal(users.length, 0);
+});
 
-    // Even the correct code is now rejected -- attempts are exhausted.
-    await assert.rejects(
-        () => verifyRegistrationOtp({ email: "juana@gmail.com", code: realCode }, deps),
-        (err: any) => {
-            assert.equal(err.statusCode, 429);
-            return true;
-        },
-    );
+test("verify-otp honours a configured attempt limit", async () => {
+    const { deps, lastCode } = createFakeDeps({ config: { ...DEFAULT_OTP_CONFIG, maxAttempts: 2 } });
+    await requestRegistrationOtp(REGISTRATION, deps);
+    const wrong = wrongCodeFor(lastCode());
+    await rejectsWithStatus(verifyRegistrationOtp({ email: "juana@example.com", code: wrong }, deps), 401);
+    await rejectsWithStatus(verifyRegistrationOtp({ email: "juana@example.com", code: wrong }, deps), 429);
+});
+
+test("verify-otp rejects an expired code with 410", async () => {
+    const { deps, advanceClock, lastCode } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+    advanceClock(TEN_MINUTES + 1);
+    await rejectsWithStatus(verifyRegistrationOtp({ email: "juana@example.com", code: lastCode() }, deps), 410);
+});
+
+test("verify-otp rejects when nothing is pending", async () => {
+    const { deps } = createFakeDeps();
+    await rejectsWithStatus(verifyRegistrationOtp({ email: "nobody@example.com", code: "123456" }, deps), 404);
+});
+
+test("verify-otp refuses an email that became a registered User meanwhile", async () => {
+    const { deps, users, lastCode, addUser } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+    addUser("juana@example.com");
+
+    await rejectsWithStatus(verifyRegistrationOtp({ email: "juana@example.com", code: lastCode() }, deps), 409);
+    assert.equal(users.length, 1, "no second account may be created");
+});
+
+test("verify-otp never logs the code or the password", async (t) => {
+    const lines = captureConsole(t);
+    const { deps, lastCode } = createFakeDeps();
+    await requestRegistrationOtp(REGISTRATION, deps);
+    const code = lastCode();
+
+    await assert.rejects(verifyRegistrationOtp({ email: "juana@example.com", code: wrongCodeFor(code) }, deps));
+    await verifyRegistrationOtp({ email: "juana@example.com", code }, deps);
+
+    assert.ok(!lines.some((line) => line.includes(code) || line.includes("secret123")));
 });

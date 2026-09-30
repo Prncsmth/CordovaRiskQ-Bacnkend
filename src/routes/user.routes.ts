@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { userController } from "@/controllers/user.controller";
 import { authenticate } from "@/middlewares/authenticate.middleware";
+import { changePasswordLimiter } from "@/middlewares/rateLimit.middleware";
 import { requireResponder } from "@/middlewares/requireResponder.middleware";
 import { validate } from "@/middlewares/validate.middleware";
 import {
@@ -22,6 +23,7 @@ router.put(
 router.post(
     "/users/change-password",
     authenticate,
+    changePasswordLimiter,
     validate(changePasswordSchema),
     userController.changePassword
 );

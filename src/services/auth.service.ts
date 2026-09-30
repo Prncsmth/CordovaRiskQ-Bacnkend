@@ -9,39 +9,10 @@ const googleClient = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
 
 const normalizeEmail = (email: string) => email.trim().toLowerCase();
 
+// Email/password accounts are created only through the 6-digit email code
+// flow (pendingRegistration.service.ts) -- there is intentionally no direct
+// register method here.
 export const authService = {
-    async register(email: string, password: string, name?: string) {
-        const normalizedEmail = normalizeEmail(email);
-
-        const existing = await prisma.user.findFirst({
-            where: {
-                email: {
-                    equals: normalizedEmail,
-                    mode: "insensitive",
-                },
-            },
-        });
-        if (existing) throw new AppError("Email already registered", 409);
-
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const user = await prisma.user.create({
-            data: { email: normalizedEmail, password: hashedPassword, name },
-        });
-
-        emitAdminActivity({
-            type: "user_registered",
-            title: "New user registered",
-            detail: user.name ?? user.email,
-            occurredAt: user.createdAt.toISOString(),
-        });
-
-        const token = signToken({ userId: user.id });
-        return {
-            user: { id: user.id, email: user.email, name: user.name, role: user.role, isOnDuty: user.isOnDuty },
-            token,
-        };
-    },
-
     async login(email: string, password: string) {
         const normalizedEmail = normalizeEmail(email);
 

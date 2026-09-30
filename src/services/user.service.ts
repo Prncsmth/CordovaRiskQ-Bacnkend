@@ -20,8 +20,14 @@ export const userService = {
         userId: string,
         data: { name?: string; email: string; mobile?: string }
     ) {
-        const existing = await prisma.user.findUnique({
-            where: { email: data.email },
+        // Matches authService's own normalizeEmail + case-insensitive lookup
+        // (register/login) -- this exact-match version previously let a
+        // second account claim a case-variant of an existing email (e.g.
+        // "Bob@gmail.com" alongside "bob@gmail.com"), since the plain unique
+        // index and this findUnique are both case-sensitive by default.
+        const normalizedEmail = data.email.trim().toLowerCase();
+        const existing = await prisma.user.findFirst({
+            where: { email: { equals: normalizedEmail, mode: "insensitive" } },
         });
         if (existing && existing.id !== userId) {
             throw new AppError("Email already in use", 409);
@@ -31,7 +37,7 @@ export const userService = {
             where: { id: userId },
             data: {
                 name: data.name,
-                email: data.email,
+                email: normalizedEmail,
                 mobile: data.mobile,
             },
         });
