@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
-    "start": "node dist/server.js",
+    "start": "tsx src/server.ts",
     "test": "tsx --test src/**/*.test.ts",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
@@ -18,6 +18,7 @@
     "@turf/boolean-point-in-polygon": "^7.4.0",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "express-rate-limit": "^8.6.2",
     "google-auth-library": "^10.9.0",
@@ -25,6 +26,7 @@
     "nodemailer": "^10.0.13",
     "pg": "^8.22.0",
     "socket.io": "^4.8.3",
+    "tsx": "^4.23.15",
     "zod": "^4.4.3"
   },
   "devDependencies": {
@@ -38,7 +40,6 @@
     "prisma": "^7.8.0",
     "ts-node": "^10.9.2",
     "tsconfig-paths": "^4.2.0",
-    "tsx": "^4.23.0",
     "typescript": "^6.0.3"
   },
   "allowScripts": {
@@ -46,5 +47,8 @@
     "@prisma/engines@7.8.0": true,
     "bcrypt@6.0.0": true,
     "esbuild@0.28.1": true
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
