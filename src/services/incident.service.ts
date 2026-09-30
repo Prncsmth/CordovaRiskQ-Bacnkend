@@ -11,8 +11,9 @@ import {
     type ResponderRosterStatus,
 } from "@/services/incidentRoster";
 import { canCancelIncident, canViewIncident } from "@/services/incidentAuthorization";
-import { emitAdminActivity, emitAdminIncidentUpdate } from "@/realtime/emit";
+import { emitAdminActivity, emitAdminIncidentUpdate, emitIncidentUpdate } from "@/realtime/emit";
 import { resolveUrgency } from "@/services/incidentUrgency";
+import { incidentStatusToAlertOutcome } from "@/services/sosAlertStatus";
 
 export const NON_TERMINAL_STATUSES =["pending", "lobby", "on_the_way", "arrived"];
 
@@ -30,7 +31,16 @@ const SOS_STATUS_NOTIFICATION_COPY: Partial<Record<string, { title: string; body
     lobby: { title: "Responder assigned", body: "A responder has accepted your SOS alert." },
     completed: { title: "Alert resolved", body: "Your SOS alert has been resolved." },
     cancelled: { title: "Alert cancelled", body: "Your SOS alert was cancelled." },
+    expired: {
+        title: "No responder available",
+        body: "No responder accepted your SOS alert. If you still need help, call an emergency hotline or send a new SOS.",
+    },
 };
+
+// An SOS that expires long after it was sent (e.g. the backlog swept up the
+// first time expiry runs) skips the citizen notification -- telling someone
+// days later that nobody came helps no one.
+const EXPIRY_NOTIFY_WINDOW_MS = 24 * 60 * 60 * 1000;
 
 async function notifyStatusChange(
     reporterId: string,
@@ -193,6 +203,28 @@ function toAdminIncidentPayload(
 ) {
     const { myStatus: _myStatus, createdAt, updatedAt, ...rest } = incident;
     return { ...rest, createdAt: createdAt.toISOString(), updatedAt: updatedAt.toISOString() };
+}
+
+// Pushes an incident's current state to the admin room and to its own
+// incident:<id> room (the citizen's tracking screen), for status changes
+// made outside a responder/citizen request -- the expiry sweep and admin close.
+async function broadcastIncidentState(id: string) {
+    const incident = await prisma.incident.findUniqueOrThrow({
+        where: { id },
+        include: { responders: { include: { responder: { select: { name: true } } } } },
+    });
+    const { responders, ...rest } = incident;
+    const shaped = buildResponderFacingIncident(rest, responders, "");
+    emitAdminIncidentUpdate(toAdminIncidentPayload(shaped));
+    emitIncidentUpdate(id, {
+        id,
+        status: shaped.status,
+        responders: shaped.responders,
+        respondersCount: shaped.respondersCount,
+        acceptedByResponderId: shaped.acceptedByResponderId,
+        updatedAt: shaped.updatedAt.toISOString(),
+    });
+    return rest;
 }
 
 export const incidentService = {
@@ -372,6 +404,11 @@ export const incidentService = {
     ) {
         const incident = await prisma.incident.findUnique({ where: { id } });
         if (!incident) throw new AppError("Incident not found", 404);
+        // A stale responder screen could otherwise join a closed or expired
+        // incident and re-derive it back to "lobby".
+        if (targetStatus === "joined" && !NON_TERMINAL_STATUSES.includes(incident.status)) {
+            throw new AppError("This incident is already closed", 409);
+        }
 
         const existingRow = await prisma.incidentResponder.findUnique({
             where: { incidentId_responderId: { incidentId: id, responderId } },
@@ -510,6 +547,66 @@ export const incidentService = {
         return result;
     },
 
+    // Moves every SOS incident still "pending" (no responder ever joined)
+    // after maxAgeMs to "expired", so the admin panel shows it as Unattended
+    // instead of New forever. Run on an interval by sosExpiryPolling.ts.
+    async expireStaleSos(maxAgeMs: number, now = new Date()) {
+        const stale = await prisma.incident.findMany({
+            where: {
+                source: "sos",
+                status: "pending",
+                createdAt: { lt: new Date(now.getTime() - maxAgeMs) },
+            },
+            select: { id: true },
+        });
+
+        let expiredCount = 0;
+        for (const { id } of stale) {
+            // Conditional on still being pending -- a responder may have
+            // joined between the findMany above and this write.
+            const { count } = await prisma.incident.updateMany({
+                where: { id, status: "pending" },
+                data: { status: "expired" },
+            });
+            if (count === 0) continue;
+            expiredCount++;
+
+            const incident = await broadcastIncidentState(id);
+            if (now.getTime() - incident.createdAt.getTime() < EXPIRY_NOTIFY_WINDOW_MS) {
+                await notifyStatusChange(incident.reporterId, incident.id, incident.status, incident.source);
+            }
+        }
+        return expiredCount;
+    },
+
+    // Admin-side close for an SOS nobody has joined (New or Unattended) --
+    // e.g. handled by phone outside the app ("resolved"), or a false alarm
+    // or duplicate ("dismissed"). See canAdminCloseSosIncident.
+    async closeSosByAdmin(sosAlertId: string, status: "completed" | "cancelled") {
+        const incident = await prisma.incident.findFirst({ where: { sosAlertId } });
+        if (!incident) throw new AppError("This SOS alert has no linked incident to close", 404);
+
+        const { count } = await prisma.incident.updateMany({
+            where: { id: incident.id, status: { in: ["pending", "expired"] } },
+            data: { status },
+        });
+        if (count === 0) {
+            throw new AppError("Only New or Unattended SOS alerts can be closed by an admin", 409);
+        }
+
+        const updated = await broadcastIncidentState(incident.id);
+        await notifyStatusChange(updated.reporterId, updated.id, updated.status, updated.source);
+        if (status === "completed") {
+            emitAdminActivity({
+                type: "incident_resolved",
+                title: "SOS alert resolved by admin",
+                detail: updated.locationLabel,
+                occurredAt: updated.updatedAt.toISOString(),
+            });
+        }
+        return updated;
+    },
+
     // Lets a reporter clear a closed report out of their own history. Only
     // terminal (completed/cancelled) reports qualify -- an active one is
     // cancelled via cancelByReporter above, never deleted outright, so
@@ -525,7 +622,14 @@ export const incidentService = {
             throw new AppError("Only a completed or cancelled report can be deleted", 409);
         }
 
+        // An SOS's admin-facing status is derived from this incident -- stamp
+        // the final outcome onto the SosAlert first, or deleting the incident
+        // would make the alert read as never handled (see sosAlertStatus.ts).
+        const outcome = incidentStatusToAlertOutcome(incident.status);
         await prisma.$transaction([
+            ...(incident.sosAlertId && outcome
+                ? [prisma.sosAlert.update({ where: { id: incident.sosAlertId }, data: { status: outcome } })]
+                : []),
             prisma.incidentResponder.deleteMany({ where: { incidentId: id } }),
             prisma.incident.delete({ where: { id } }),
         ]);

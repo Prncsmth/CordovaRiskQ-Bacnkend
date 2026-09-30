@@ -5,7 +5,7 @@ import { asyncHandler } from "@/utils/asyncHandler";
 import { queryDate, queryInt, queryString } from "@/utils/queryParams";
 import type { AlertStatus } from "@/services/sosAlertStatus";
 
-const ALERT_STATUSES: AlertStatus[] = ["New", "Acknowledged", "Resolved", "Cancelled"];
+const ALERT_STATUSES: AlertStatus[] = ["New", "Acknowledged", "Resolved", "Cancelled", "Unattended"];
 
 function queryAlertStatus(value: unknown): AlertStatus | undefined {
     const str = queryString(value);
@@ -35,5 +35,10 @@ export const sosController = {
     getAdminSummary: asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
         const summary = await sosService.getAdminSummary();
         res.status(200).json({ success: true, summary });
+    }),
+
+    closeForAdmin: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        const alert = await sosService.closeForAdmin(req.params.id as string, req.body.outcome);
+        res.status(200).json({ success: true, alert });
     }),
 };
