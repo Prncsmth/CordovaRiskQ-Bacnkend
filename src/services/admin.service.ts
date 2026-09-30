@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
-import { mergeRecentActivity, type AdminActivityItem } from "@/services/adminActivity";
+import { mergeRecentActivity, supportRequestDetail, type AdminActivityItem } from "@/services/adminActivity";
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const NON_TERMINAL_STATUSES = ["pending", "lobby", "on_the_way", "arrived"];
@@ -177,7 +177,7 @@ export const adminService = {
         const cappedLimit = Math.min(Math.max(limit, 1), 100);
         const take = cappedLimit;
 
-        const [sosAlerts, reportedIncidents, joinedRows, resolvedIncidents, evacuationCenters, newUsers] = await Promise.all([
+        const [sosAlerts, reportedIncidents, joinedRows, resolvedIncidents, evacuationCenters, newUsers, supportRequests] = await Promise.all([
             prisma.sosAlert.findMany({
                 orderBy: { createdAt: "desc" },
                 take,
@@ -211,6 +211,13 @@ export const adminService = {
             prisma.user.findMany({
                 orderBy: { createdAt: "desc" },
                 take,
+            }),
+            // Mirrors the live emitAdminActivity("support_request") call in
+            // supportRequest.service.ts's create().
+            prisma.supportRequest.findMany({
+                orderBy: { createdAt: "desc" },
+                take,
+                include: { user: { select: { name: true } } },
             }),
         ]);
 
@@ -260,6 +267,12 @@ export const adminService = {
                 title: "New user registered",
                 detail: user.name ?? user.email,
                 occurredAt: user.createdAt.toISOString(),
+            })),
+            ...supportRequests.map((request) => ({
+                type: "support_request" as const,
+                title: "New support request",
+                detail: supportRequestDetail(request.subject, request.topic, request.user.name),
+                occurredAt: request.createdAt.toISOString(),
             })),
         ];
 

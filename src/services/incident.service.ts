@@ -448,7 +448,8 @@ export const incidentService = {
             );
         }
 
-        const actorName = allRows.find((r) => r.responderId === responderId)?.responder.name ?? "A responder";
+        const myRow = allRows.find((r) => r.responderId === responderId);
+        const actorName = myRow?.responder.name ?? "A responder";
         await notifyTeammatesOfRosterChange(id, responderId, actorName, targetStatus, allRows);
 
         if (targetStatus === "joined") {
@@ -456,7 +457,11 @@ export const incidentService = {
                 type: "responder_joined",
                 title: `${actorName} joined an incident`,
                 detail: incident.locationLabel,
-                occurredAt: new Date().toISOString(),
+                // The row's createdAt, not "now" -- GET /admin/activity
+                // (admin.service.ts) stamps this same event with it, and the
+                // admin panel keys read state on occurredAt, so a mismatch
+                // made a read notification come back unread after reload.
+                occurredAt: (myRow?.createdAt ?? new Date()).toISOString(),
             });
         }
 

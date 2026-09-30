@@ -99,7 +99,11 @@ export const sosService = {
                 emitAdminActivity({
                     type: "sos_alert",
                     title: "New SOS alert received",
-                    detail: input.locationLabel ?? "Location unavailable",
+                    // Same source GET /admin/activity reads (the linked
+                    // incident's label, "SOS Alert" when no location was
+                    // given) -- the admin panel keys read state on detail, so
+                    // the two must match or a read alert returns unread.
+                    detail: incident?.locationLabel ?? "Location unavailable",
                     occurredAt: alert.createdAt.toISOString(),
                 });
                 if (incident) incidentService.announceSosIncident(incident);
