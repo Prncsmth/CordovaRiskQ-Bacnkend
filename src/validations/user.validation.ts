@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { passwordField } from "./password.schema";
 
 // Accepts "09171234567" or "+639171234567", with or without spaces/dashes
 // (e.g. the "+63 912 345 6789" format app/phone-number.tsx saves) -- spaces
@@ -28,7 +29,7 @@ export const updateProfileSchema = z.object({
 
 export const changePasswordSchema = z.object({
     oldPassword: z.string().min(1, "Old password is required"),
-    newPassword: z.string().min(6, "Password must be at least 6 characters"),
+    newPassword: passwordField,
 });
 
 export const updatePushTokenSchema = z.object({

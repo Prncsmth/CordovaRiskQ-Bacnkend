@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { passwordField } from "./password.schema";
 
 const emailField = z
     .string()
@@ -20,7 +21,7 @@ export const googleAuthSchema = z.object({
 export const requestRegistrationOtpSchema = z.object({
     name: z.string().trim().min(1, "Name is required").max(100, "Name is too long"),
     email: emailField,
-    password: z.string().min(6, "Password must be at least 6 characters"),
+    password: passwordField,
 });
 
 // Only the email: the password was already hashed and stored by request-otp.
