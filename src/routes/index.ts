@@ -1,4 +1,5 @@
 import { Router } from "express";
+import healthRoutes from "@/routes/health.routes";
 import testRoutes from "@/routes/test.routes";
 import authRoutes from "@/routes/auth.routes";
 import userRoutes from "@/routes/user.routes";
@@ -18,6 +19,7 @@ import supportRequestRoutes from "@/routes/supportRequest.routes";
 // As you add new resources, do: router.use(entityRoutes) below.
 const router = Router();
 
+router.use(healthRoutes);
 router.use(testRoutes);
 router.use(authRoutes);
 router.use(userRoutes);
