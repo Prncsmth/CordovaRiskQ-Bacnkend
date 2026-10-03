@@ -6,6 +6,12 @@ import { errorHandler } from "@/middlewares/errorHandler.middleware";
 
 const app: Application = express();
 
+// Render sits as exactly one reverse proxy in front of this service -- without
+// this, Express ignores the X-Forwarded-For header it sets, so express-rate-limit
+// can't tell real clients apart by IP (every request looks like it came from
+// Render's proxy instead of the actual caller).
+app.set("trust proxy", 1);
+
 // Middlewares
 app.use(
   cors({
