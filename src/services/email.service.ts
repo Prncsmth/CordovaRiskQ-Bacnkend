@@ -1,18 +1,15 @@
 // src/services/email.service.ts
-// Sends CORDOVA RISKQ's registration OTP over SMTP (Gmail with an App
-// Password -- no custom domain needed). All connection settings come from
-// the environment:
-//   SMTP_HOST (default smtp.gmail.com), SMTP_PORT, SMTP_SECURE,
-//   SMTP_USER, SMTP_PASS, and optional EMAIL_FROM.
-// Neither the OTP nor SMTP_PASS is ever logged.
-import nodemailer from "nodemailer";
+// Sends CORDOVA RISKQ's registration OTP via Resend's HTTPS API.
+//
+// Previously used raw SMTP (nodemailer + Gmail), but on Render that SMTP
+// connection to smtp.gmail.com hung indefinitely instead of failing --
+// Gmail silently blackholes/throttles SMTP-AUTH from unfamiliar
+// cloud-datacenter IPs. An HTTPS API call doesn't have that failure mode,
+// and this exact Resend integration was already proven working before the
+// SMTP switch. Needs RESEND_API_KEY (and optionally EMAIL_FROM) set in the
+// environment -- never logged.
+import { Resend } from "resend";
 import { AppError } from "@/utils/AppError";
-
-export type EmailMessage = { from: string; to: string; subject: string; text: string };
-
-// The one method this service needs from a nodemailer transporter, so tests
-// can pass a fake without any network.
-export type EmailTransport = { sendMail(message: EmailMessage): Promise<unknown> };
 
 export const OTP_EMAIL_SUBJECT = "Your CORDOVA RISKQ Verification Code";
 
@@ -28,75 +25,53 @@ export function buildOtpEmailText(code: string, expiryMinutes: number): string {
     ].join("\n");
 }
 
-type SmtpConfig = {
-    host: string;
-    port: number;
-    secure: boolean;
-    user: string;
-    pass: string;
-    from: string;
+// The one method this service needs from a Resend client, so tests can pass
+// a fake without any network.
+export type ResendClient = {
+    emails: {
+        send(message: {
+            from: string;
+            to: string;
+            subject: string;
+            text: string;
+        }): Promise<{ data: unknown; error: { message: string } | null }>;
+    };
 };
 
-export function readSmtpConfig(env: Record<string, string | undefined> = process.env): SmtpConfig {
-    const user = env.SMTP_USER?.trim();
-    const pass = env.SMTP_PASS?.trim();
-    const missing = [!user && "SMTP_USER", !pass && "SMTP_PASS"].filter(Boolean);
-    if (missing.length > 0) {
-        // Names only -- never values.
-        throw new AppError(`Email is not configured (${missing.join(", ")} not set)`, 500);
-    }
-    const secure = (env.SMTP_SECURE ?? "true").trim().toLowerCase() !== "false";
-    const port = Number(env.SMTP_PORT) || (secure ? 465 : 587);
-    return {
-        host: env.SMTP_HOST?.trim() || "smtp.gmail.com",
-        port,
-        secure,
-        user: user!,
-        pass: pass!,
-        from: env.EMAIL_FROM?.trim() || `"CORDOVA RISKQ" <${user}>`,
-    };
-}
-
-// Created on first send, not at module load: a missing SMTP setting then
+// Created on first send, not at module load: a missing RESEND_API_KEY then
 // fails only the OTP request instead of crashing the whole server on boot.
-let transport: EmailTransport | null = null;
-let fromAddress = "";
+let client: ResendClient | null = null;
 
-function getTransport(): EmailTransport {
-    if (!transport) {
-        const config = readSmtpConfig();
-        transport = nodemailer.createTransport({
-            host: config.host,
-            port: config.port,
-            secure: config.secure,
-            auth: { user: config.user, pass: config.pass },
-        });
-        fromAddress = config.from;
+function getClient(): ResendClient {
+    if (!client) {
+        client = new Resend(process.env.RESEND_API_KEY) as unknown as ResendClient;
     }
-    return transport;
+    return client;
 }
 
 export async function sendOtpEmail(
     to: string,
     code: string,
     expiryMinutes: number,
-    // Injectable for tests; defaults to the real SMTP transport.
-    deps: { transport: EmailTransport; from: string } | null = null,
+    // Injectable for tests; defaults to the real Resend client.
+    deps: { client: ResendClient; from: string } | null = null,
 ): Promise<void> {
-    const mailer = deps?.transport ?? getTransport();
-    const from = deps?.from ?? fromAddress;
+    const resend = deps?.client ?? getClient();
+    const from = deps?.from ?? process.env.EMAIL_FROM ?? "CORDOVA RISKQ <onboarding@resend.dev>";
 
-    try {
-        await mailer.sendMail({ from, to, subject: OTP_EMAIL_SUBJECT, text: buildOtpEmailText(code, expiryMinutes) });
-    } catch (err) {
-        // Only transport metadata -- the message/stack could echo the email
-        // body, which contains the code.
-        const e = err as { code?: unknown; responseCode?: unknown; command?: unknown };
-        console.error("Verification email send failed", {
-            code: e?.code,
-            responseCode: e?.responseCode,
-            command: e?.command,
-        });
+    const { error } = await resend.emails.send({
+        from,
+        to,
+        subject: OTP_EMAIL_SUBJECT,
+        text: buildOtpEmailText(code, expiryMinutes),
+    });
+
+    if (error) {
+        // The SDK resolves { data, error } instead of rejecting on a failed
+        // send -- without this check, a bad API key, a Resend outage, or a
+        // bounced address would silently look like success to the caller.
+        // Log only the error message, never the code or recipient.
+        console.error("Verification email send failed", { message: error.message });
         throw new AppError("Couldn't send the verification email. Please try again.", 502);
     }
 }
