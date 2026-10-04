@@ -8,13 +8,10 @@ const PH_MOBILE_REGEX = /^(\+639\d{9}|09\d{9})$/;
 
 export const updateProfileSchema = z.object({
     name: z.string().optional(),
-    email: z
-        .string()
-        .trim()
-        .email("Invalid email address")
-        .refine((value) => value.toLowerCase().endsWith("@gmail.com"), {
-            message: "Only Gmail addresses (@gmail.com) are allowed",
-        }),
+    // Optional and never written: the email can't be changed (see
+    // services/accountEmail.ts). Older app versions still send the current
+    // one, which the service accepts; a different one is rejected there.
+    email: z.string().trim().optional(),
     // Optional: some accounts (e.g. admin-provisioned responders) never go
     // through the mobile-number onboarding gate. When a value IS given, it
     // must be a real PH mobile number -- not just any string.

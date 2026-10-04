@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import { OAuth2Client } from "google-auth-library";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
+import { verifiedGoogleEmail } from "@/services/accountEmail";
 import { issueSessionToken } from "@/services/sessionAuth";
 import { emitAdminActivity } from "@/realtime/emit";
 
@@ -58,15 +59,19 @@ export const authService = {
             throw new AppError("Invalid Google token", 401);
         }
 
-        if (!payload?.email) {
+        // Only an email Google has verified may find, link or create an
+        // account -- see accountEmail.ts.
+        const normalizedEmail = verifiedGoogleEmail(payload);
+        if (!payload || !normalizedEmail) {
             throw new AppError("Invalid Google token", 401);
         }
 
-        const { email, name, sub: googleId } = payload;
-        const normalizedEmail = normalizeEmail(email);
+        const { name, sub: googleId } = payload;
 
         // Find by googleId first (returning Google user), then by email
-        // (existing password account signing in with Google for the first time).
+        // (existing password account signing in with Google for the first
+        // time). Linking by email is safe because an account's email can't
+        // be changed after it was verified at sign-up (accountEmail.ts).
         let user = await prisma.user.findUnique({ where: { googleId } });
         let isNewUser = false;
 

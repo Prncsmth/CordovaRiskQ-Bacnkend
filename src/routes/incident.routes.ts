@@ -2,6 +2,7 @@ import { Router } from "express";
 import { incidentController } from "@/controllers/incident.controller";
 import { authenticate } from "@/middlewares/authenticate.middleware";
 import { requireIncidentInsideCordova } from "@/middlewares/geofence.middleware";
+import { reportLimiter } from "@/middlewares/rateLimit.middleware";
 import { requireResponder } from "@/middlewares/requireResponder.middleware";
 import { requireResponderOrAdmin } from "@/middlewares/requireResponderOrAdmin.middleware";
 import { validate } from "@/middlewares/validate.middleware";
@@ -16,6 +17,9 @@ const router = Router();
 router.post(
     "/incidents",
     authenticate,
+    // Per account (after authenticate): each report pages every on-duty
+    // responder, so it's capped at 5 per 10 minutes.
+    reportLimiter,
     validate(createIncidentSchema),
     requireIncidentInsideCordova,
     incidentController.create

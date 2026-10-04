@@ -2,6 +2,7 @@ import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
 import { disconnectUserSockets, emitAdminResponderDutyChanged } from "@/realtime/emit";
+import { assertEmailUnchanged } from "@/services/accountEmail";
 import { changePassword } from "@/services/changePasswordFlow";
 import { issueSessionToken, passwordUpdateData } from "@/services/sessionAuth";
 
@@ -20,26 +21,24 @@ export const userService = {
 
     async updateProfile(
         userId: string,
-        data: { name?: string; email: string; mobile?: string }
+        data: { name?: string; email?: string; mobile?: string }
     ) {
-        // Matches authService's own normalizeEmail + case-insensitive lookup
-        // (register/login) -- this exact-match version previously let a
-        // second account claim a case-variant of an existing email (e.g.
-        // "Bob@gmail.com" alongside "bob@gmail.com"), since the plain unique
-        // index and this findUnique are both case-sensitive by default.
-        const normalizedEmail = data.email.trim().toLowerCase();
-        const existing = await prisma.user.findFirst({
-            where: { email: { equals: normalizedEmail, mode: "insensitive" } },
+        const current = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { email: true },
         });
-        if (existing && existing.id !== userId) {
-            throw new AppError("Email already in use", 409);
-        }
+        if (!current) throw new AppError("User not found", 404);
+
+        // The email is the account's verified login identity and can't be
+        // changed here -- an unverified change enabled a Google-linking
+        // account takeover (see accountEmail.ts). Sending the same email is
+        // still fine.
+        assertEmailUnchanged(current.email, data.email);
 
         const user = await prisma.user.update({
             where: { id: userId },
             data: {
                 name: data.name,
-                email: normalizedEmail,
                 mobile: data.mobile,
             },
         });
