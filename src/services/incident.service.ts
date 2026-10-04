@@ -13,6 +13,7 @@ import {
 import { canCancelIncident, canViewIncident } from "@/services/incidentAuthorization";
 import { emitAdminActivity, emitAdminIncidentUpdate, emitIncidentUpdate } from "@/realtime/emit";
 import { resolveUrgency } from "@/services/incidentUrgency";
+import { ROSTER_NOTIFICATION_COPY } from "@/services/rosterNotificationCopy";
 import { incidentStatusToAlertOutcome } from "@/services/sosAlertStatus";
 
 export const NON_TERMINAL_STATUSES =["pending", "lobby", "on_the_way", "arrived"];
@@ -59,20 +60,6 @@ async function notifyStatusChange(
         referenceId: incidentId,
     });
 }
-
-// Copy shown to a responder's teammates (never the actor) when the actor's
-// own roster row changes on an incident they're already helping with.
-// "declined" is intentionally absent: a decline never leaves any prior row
-// for anyone else to have seen the responder join in the first place, so it
-// has nobody to notify.
-const ROSTER_NOTIFICATION_COPY: Partial<
-    Record<ResponderRosterStatus, (name: string) => { title: string; body: string }>
-> = {
-    joined: (name) => ({ title: "Responder joined", body: `${name} joined this incident.` }),
-    on_the_way: (name) => ({ title: "Responder en route", body: `${name} is on the way.` }),
-    arrived: (name) => ({ title: "Responder arrived", body: `${name} arrived on scene.` }),
-    left: (name) => ({ title: "Responder left", body: `${name} left this incident.` }),
-};
 
 const CLOSED_INCIDENT_NOTIFICATION_COPY: Record<"completed" | "cancelled", { title: string; body: string }> = {
     completed: { title: "Incident completed", body: "This incident has been marked completed." },

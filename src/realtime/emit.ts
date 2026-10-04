@@ -8,8 +8,27 @@ import type { AdminActivityItem } from "@/services/adminActivity";
 
 let ioInstance: Server | null = null;
 
-export function setIo(server: Server): void {
+export function setIo(server: Server | null): void {
     ioInstance = server;
+}
+
+// Drops every live socket belonging to one user. Called right after a
+// password change/reset: those sessions were just revoked (tokenVersion),
+// but socket.ts only checks the token when a socket connects, so an already
+// open socket would otherwise keep receiving this user's live events until
+// it happened to reconnect. Scoped to the user's own user:<id> room (every
+// socket joins it on connect, see socket.ts), so no one else is affected.
+//
+// The device that made the change reconnects by itself: the app reopens its
+// sockets whenever its token changes, and it stores the fresh token that
+// change-password returns. Never throws -- a realtime hiccup must not fail a
+// password change that already succeeded.
+export function disconnectUserSockets(userId: string): void {
+    try {
+        ioInstance?.in(`user:${userId}`).disconnectSockets(true);
+    } catch (error) {
+        console.error("Failed to disconnect sockets after a password change:", error);
+    }
 }
 
 // Deliberately omits myStatus -- it's per-requester

@@ -4,7 +4,7 @@
 import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { emitAdminActivity } from "@/realtime/emit";
-import { signToken } from "@/utils/jwt";
+import { issueSessionToken } from "@/services/sessionAuth";
 import { sendOtpEmail } from "@/services/email.service";
 import {
     loadOtpConfig,
@@ -113,7 +113,8 @@ export const pendingRegistrationService = {
 
     async verifyOtp(input: { email: string; code: string }) {
         const user = await verifyRegistrationOtp(input, deps);
-        const token = signToken({ userId: user.id });
+        // A brand-new account always starts at tokenVersion 0 (column default).
+        const token = issueSessionToken({ id: user.id, tokenVersion: 0 });
         return {
             user: { id: user.id, email: user.email, name: user.name, role: user.role, isOnDuty: user.isOnDuty },
             token,

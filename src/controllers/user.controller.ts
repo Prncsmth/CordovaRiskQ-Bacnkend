@@ -15,8 +15,10 @@ export const userController = {
     }),
 
     changePassword: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        await userService.changePassword(req.userId!, req.body);
-        res.status(200).json({ success: true });
+        // A fresh token for this device -- the old one was just revoked along
+        // with every other session for this user.
+        const { token } = await userService.changePassword(req.userId!, req.body);
+        res.status(200).json({ success: true, token });
     }),
 
     updatePushToken: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {

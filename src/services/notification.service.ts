@@ -33,20 +33,10 @@ function chunk<T>(items: T[], size: number): T[][] {
     return chunks;
 }
 
-// TEMP DEBUG: masks a push token down to a prefix so it's identifiable in
-// logs without exposing the full, usable token. Remove with the other
-// [push-debug] lines once Expo delivery is confirmed working.
-function maskToken(token: string): string {
-    return token.length > 12 ? `${token.slice(0, 12)}...` : token;
-}
-
 async function sendPushToRecipients(
     recipients: { id: string; pushToken: string | null }[],
     data: NotificationData
 ) {
-    // TEMP DEBUG
-    console.log("[push-debug] Recipient count passed to sendPushToRecipients:", recipients.length);
-
     const targets = recipients.filter(
         (r): r is { id: string; pushToken: string } => r.pushToken !== null
     );
@@ -69,12 +59,6 @@ async function sendPushToRecipients(
                 data: expoData,
             }));
 
-            // TEMP DEBUG
-            console.log(
-                "[push-debug] Expo payload:",
-                JSON.stringify(messages.map((m) => ({ ...m, to: maskToken(m.to) })))
-            );
-
             const response = await fetch(EXPO_PUSH_URL, {
                 method: "POST",
                 headers: { Accept: "application/json", "Content-Type": "application/json" },
@@ -90,17 +74,17 @@ async function sendPushToRecipients(
             const result = (await response.json()) as { data?: ExpoPushTicket[] };
             if (!Array.isArray(result.data)) continue;
 
-            // TEMP DEBUG: result.data is positionally aligned with this
-            // chunk's own message array, not the full original targets array.
-            targetChunk.forEach((t, i) => {
-                console.log(
-                    "[push-debug] Expo response for user",
-                    t.id,
-                    ":",
-                    result.data![i]?.status,
-                    result.data![i]?.details?.error ?? ""
+            // Production troubleshooting without identifying anyone: how many
+            // tickets in this chunk failed, and Expo's error codes only --
+            // never user ids or tokens.
+            const failedTickets = result.data.filter((ticket) => ticket?.status === "error");
+            if (failedTickets.length > 0) {
+                const errorCodes = [...new Set(failedTickets.map((t) => t.details?.error ?? "unknown"))];
+                console.error(
+                    `Expo push: ${failedTickets.length} of ${result.data.length} tickets failed:`,
+                    errorCodes.join(", ")
                 );
-            });
+            }
 
             // result.data is positionally aligned with this chunk's own
             // message array, not the full original targets array.
@@ -185,9 +169,6 @@ export const notificationService = {
                 select: { id: true, pushToken: true },
             });
 
-            // TEMP DEBUG
-            console.log("[push-debug] Users with non-null pushToken:", recipients.length);
-
             await sendPushToRecipients(recipients, data);
         } catch (error) {
             console.error("Failed to create notifications for users:", error);
@@ -204,9 +185,6 @@ export const notificationService = {
                 where: { role: "citizen" },
                 select: { id: true },
             });
-
-            // TEMP DEBUG
-            console.log("[push-debug] Citizens found:", citizens.length);
 
             await this.createForUsers(
                 citizens.map((c) => c.id),
@@ -229,15 +207,6 @@ export const notificationService = {
                 where: { role: "responder", ...(onDutyOnly ? { isOnDuty: true } : {}) },
                 select: { id: true },
             });
-
-            // TEMP DEBUG
-            console.log(
-                "[push-debug] Responders found:",
-                responders.length,
-                "(onDutyOnly:",
-                onDutyOnly,
-                ")"
-            );
 
             await this.createForUsers(
                 responders.map((r) => r.id),

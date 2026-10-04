@@ -1,29 +1,38 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
 import { notificationService } from "@/services/notification.service";
+import {
+    activeAnnouncementConditions,
+    findViewableAnnouncement,
+} from "@/services/announcementAudience";
 
 export const announcementService = {
-    async getById(id: string) {
-        const announcement = await prisma.announcement.findUnique({
-            where: { id },
-            include: { createdBy: { select: { name: true } } },
-        });
+    // viewerRole is null for an anonymous caller. Responders Only
+    // announcements are only returned to a responder (see
+    // announcementAudience.canViewAnnouncement).
+    async getById(id: string, viewerRole: string | null) {
+        const announcement = await findViewableAnnouncement(id, viewerRole, (announcementId) =>
+            prisma.announcement.findUnique({
+                where: { id: announcementId },
+                include: { createdBy: { select: { name: true } } },
+            })
+        );
         if (!announcement) throw new AppError("Announcement not found", 404);
         return announcement;
     },
 
     async getActive(barangayName?: string) {
-        const conditions: Array<Record<string, unknown>> = [{ audience: "All Users" }];
-
-        if (barangayName) {
-            conditions.push({
-                audience: "Specific Barangay",
-                barangayName: { equals: barangayName, mode: "insensitive" },
-            });
-        }
-
         return prisma.announcement.findFirst({
-            where: { OR: conditions },
+            where: { OR: activeAnnouncementConditions({ barangayName }) },
+            orderBy: { createdAt: "desc" },
+        });
+    },
+
+    // The responder dashboard's card: newest of "All Users" and "Responders
+    // Only". Served only behind authenticate + requireResponder.
+    async getActiveForResponder() {
+        return prisma.announcement.findFirst({
+            where: { OR: activeAnnouncementConditions({ includeRespondersOnly: true }) },
             orderBy: { createdAt: "desc" },
         });
     },
@@ -83,9 +92,6 @@ export const announcementService = {
                 createdByUserId,
             },
         });
-
-        // TEMP DEBUG
-        console.log("[push-debug] Selected audience:", data.audience);
 
         const notificationData = {
             type: "announcement" as const,

@@ -26,8 +26,9 @@ export const authController = {
 
     forgotPassword: asyncHandler(async (req: Request, res: Response) => {
         const { email } = req.body;
-        // Identical response whether or not the email has an account.
-        const result = await passwordResetService.requestReset({ email });
+        // Identical response, and identical timing, whether or not the email
+        // has an account -- the email itself is sent in the background.
+        const result = passwordResetService.requestReset({ email });
         res.status(200).json({ success: true, ...result });
     }),
 

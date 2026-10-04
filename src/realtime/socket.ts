@@ -9,7 +9,8 @@ import { Server, Socket } from "socket.io";
 import { prisma } from "@/lib/prisma";
 import { canViewIncident } from "@/services/incidentAuthorization";
 import { setIo } from "@/realtime/emit";
-import { verifyToken } from "@/utils/jwt";
+import { prismaSessionUserStore } from "@/middlewares/authenticate.middleware";
+import { verifySession } from "@/services/sessionAuth";
 
 interface AuthenticatedSocket extends Socket {
     userId?: string;
@@ -26,17 +27,20 @@ export function initRealtime(httpServer: HttpServer): void {
             next(new Error("Missing or invalid Authorization"));
             return;
         }
-        try {
-            const payload = verifyToken(token) as { userId?: string };
-            if (!payload.userId) {
+        // Same check as REST's authenticate, so a token revoked by a password
+        // change/reset can't open a socket either.
+        verifySession(token, prismaSessionUserStore)
+            .then((session) => {
+                if (!session) {
+                    next(new Error("Missing or invalid Authorization"));
+                    return;
+                }
+                socket.userId = session.userId;
+                next();
+            })
+            .catch(() => {
                 next(new Error("Missing or invalid Authorization"));
-                return;
-            }
-            socket.userId = payload.userId;
-            next();
-        } catch {
-            next(new Error("Missing or invalid Authorization"));
-        }
+            });
     });
 
     io.on("connection", (socket: AuthenticatedSocket) => {

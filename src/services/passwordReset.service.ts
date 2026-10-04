@@ -6,9 +6,12 @@ import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { sendPasswordResetEmail } from "@/services/email.service";
 import { loadOtpConfig } from "@/services/pendingRegistrationFlow";
+import { passwordUpdateData } from "@/services/sessionAuth";
+import { runInBackground } from "@/utils/runInBackground";
+import { disconnectUserSockets } from "@/realtime/emit";
 import {
-    requestPasswordReset,
     resetPassword,
+    startPasswordResetRequest,
     type PasswordResetDeps,
     type PasswordResetStore,
     type PasswordResetUserStore,
@@ -57,7 +60,8 @@ const userStore: PasswordResetUserStore = {
         return user ? { id: user.id, hasPassword: user.password !== null } : null;
     },
     async updatePassword(userId, passwordHash) {
-        await prisma.user.update({ where: { id: userId }, data: { password: passwordHash } });
+        // Also revokes every existing session for this user (tokenVersion).
+        await prisma.user.update({ where: { id: userId }, data: passwordUpdateData(passwordHash) });
     },
 };
 
@@ -73,14 +77,18 @@ const deps: PasswordResetDeps = {
     userStore,
     ...passwordResetHashing,
     sendResetEmail: (to, code, expiryMinutes) => sendPasswordResetEmail(to, code, expiryMinutes),
+    // The reset just revoked every session (tokenVersion); also drop any
+    // socket still open for this user.
+    onPasswordChanged: disconnectUserSockets,
     now: () => new Date(),
     // Same OTP_* settings as registration; read once at startup.
     config: loadOtpConfig(),
 };
 
 export const passwordResetService = {
+    // Returns at once; the lookup and email happen in the background.
     requestReset(input: { email: string }) {
-        return requestPasswordReset(input, deps);
+        return startPasswordResetRequest(input, deps, runInBackground);
     },
 
     reset(input: { email: string; code: string; newPassword: string }) {

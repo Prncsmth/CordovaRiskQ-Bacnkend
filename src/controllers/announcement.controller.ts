@@ -5,14 +5,24 @@ import { asyncHandler } from "@/utils/asyncHandler";
 import { queryInt, queryString } from "@/utils/queryParams";
 
 export const announcementController = {
-    getById: asyncHandler(async (req: Request, res: Response) => {
-        const announcement = await announcementService.getById(req.params.id as string);
+    // Behind optionalAuthenticate: req.userRole is set only for a current
+    // session, and decides whether a Responders Only announcement is visible.
+    getById: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        const announcement = await announcementService.getById(
+            req.params.id as string,
+            req.userRole ?? null
+        );
         res.status(200).json({ success: true, announcement });
     }),
 
     getActive: asyncHandler(async (req: Request, res: Response) => {
         const barangay = typeof req.query.barangay === "string" ? req.query.barangay : undefined;
         const announcement = await announcementService.getActive(barangay);
+        res.status(200).json({ success: true, announcement });
+    }),
+
+    getActiveForResponder: asyncHandler(async (_req: AuthenticatedRequest, res: Response) => {
+        const announcement = await announcementService.getActiveForResponder();
         res.status(200).json({ success: true, announcement });
     }),
 

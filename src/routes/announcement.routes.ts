@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { announcementController } from "@/controllers/announcement.controller";
-import { authenticate } from "@/middlewares/authenticate.middleware";
+import { authenticate, optionalAuthenticate } from "@/middlewares/authenticate.middleware";
 import { requireAdmin } from "@/middlewares/requireAdmin.middleware";
+import { requireResponder } from "@/middlewares/requireResponder.middleware";
 import { validate } from "@/middlewares/validate.middleware";
 import { createAnnouncementSchema } from "@/validations/announcement.validation";
 
@@ -10,7 +11,18 @@ const router = Router();
 // Public safety content -- no authenticate middleware. /active is registered
 // first so it isn't shadowed by the /:id route below.
 router.get("/announcements/active", announcementController.getActive);
-router.get("/announcements/:id", announcementController.getById);
+// Includes "Responders Only" announcements, so unlike /active it requires a
+// logged-in responder.
+router.get(
+    "/announcements/active/responder",
+    authenticate,
+    requireResponder,
+    announcementController.getActiveForResponder
+);
+// Public for every audience except Responders Only, which needs a signed-in
+// responder -- optionalAuthenticate identifies one without rejecting
+// anonymous callers.
+router.get("/announcements/:id", optionalAuthenticate, announcementController.getById);
 
 router.get("/admin/announcements", authenticate, requireAdmin, announcementController.listForAdmin);
 router.post(

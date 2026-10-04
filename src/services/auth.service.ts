@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import { OAuth2Client } from "google-auth-library";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
-import { signToken } from "@/utils/jwt";
+import { issueSessionToken } from "@/services/sessionAuth";
 import { emitAdminActivity } from "@/realtime/emit";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
@@ -37,7 +37,7 @@ export const authService = {
         const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) throw new AppError("Invalid email or password", 401);
 
-        const token = signToken({ userId: user.id });
+        const token = issueSessionToken(user);
         return {
             user: { id: user.id, email: user.email, name: user.name, role: user.role, isOnDuty: user.isOnDuty },
             token,
@@ -101,7 +101,7 @@ export const authService = {
             }
         }
 
-        const token = signToken({ userId: user.id });
+        const token = issueSessionToken(user);
         return {
             user: { id: user.id, email: user.email, name: user.name, role: user.role, isOnDuty: user.isOnDuty },
             token,

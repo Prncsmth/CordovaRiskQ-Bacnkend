@@ -46,6 +46,9 @@ export interface PasswordResetDeps {
     compareHash(value: string, hash: string): Promise<boolean>;
     // Must throw on failure. Never log the code.
     sendResetEmail(to: string, code: string, expiryMinutes: number): Promise<void>;
+    // Runs right after a successful reset (production: disconnect the user's
+    // live sockets). Must not throw.
+    onPasswordChanged(userId: string): void;
     now(): Date;
     config: OtpConfig;
 }
@@ -101,6 +104,27 @@ export async function requestPasswordReset(
     return response;
 }
 
+// What POST /forgot-password actually calls. Answers immediately with the
+// generic response and runs requestPasswordReset (account lookup, cooldown,
+// email, saving the code) in the background -- so a real account, an
+// unknown email and a Google-only account all take the same time to answer.
+// Awaiting the email for real accounts only made response time reveal
+// whether an account exists.
+//
+// requestPasswordReset is unchanged, so the code, its single use and the
+// cooldown behave exactly as before: the cooldown still applies (silently),
+// and a failed send still leaves no new code behind. `schedule` is
+// runInBackground in production, which logs a failed task by label only --
+// never the email or the code.
+export function startPasswordResetRequest(
+    input: { email: string },
+    deps: PasswordResetDeps,
+    schedule: (label: string, task: () => Promise<unknown>) => void,
+): { message: string; resendCooldownSeconds: number } {
+    schedule("password reset request", () => requestPasswordReset(input, deps));
+    return genericResponse(deps.config);
+}
+
 export async function resetPassword(
     input: { email: string; code: string; newPassword: string },
     deps: PasswordResetDeps,
@@ -138,5 +162,6 @@ export async function resetPassword(
     if (!user || !user.hasPassword) throw invalid();
 
     await deps.userStore.updatePassword(user.id, await deps.hash(input.newPassword));
+    deps.onPasswordChanged(user.id);
     return { message: PASSWORD_RESET_SUCCESS_MESSAGE };
 }

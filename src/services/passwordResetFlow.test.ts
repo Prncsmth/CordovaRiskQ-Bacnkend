@@ -8,6 +8,7 @@ import {
     INVALID_RESET_CODE_MESSAGE,
     requestPasswordReset,
     resetPassword,
+    startPasswordResetRequest,
     type PasswordResetDeps,
     type PasswordResetRow,
 } from "@/services/passwordResetFlow";
@@ -26,6 +27,7 @@ function createFakeDeps(overrides: Partial<PasswordResetDeps> = {}) {
     ];
     const sentEmails: { to: string; code: string; expiryMinutes: number }[] = [];
     const passwordUpdates: { userId: string; passwordHash: string }[] = [];
+    const passwordChangedUserIds: string[] = [];
     let clock = START;
 
     const deps: PasswordResetDeps = {
@@ -63,6 +65,9 @@ function createFakeDeps(overrides: Partial<PasswordResetDeps> = {}) {
         async sendResetEmail(to, code, expiryMinutes) {
             sentEmails.push({ to, code, expiryMinutes });
         },
+        onPasswordChanged(userId) {
+            passwordChangedUserIds.push(userId);
+        },
         now: () => clock,
         config: DEFAULT_OTP_CONFIG,
         ...overrides,
@@ -74,6 +79,7 @@ function createFakeDeps(overrides: Partial<PasswordResetDeps> = {}) {
         users,
         sentEmails,
         passwordUpdates,
+        passwordChangedUserIds,
         advanceClock(ms: number) {
             clock = new Date(clock.getTime() + ms);
         },
@@ -390,4 +396,92 @@ test("configured OTP settings (expiry / attempts) are honoured", async () => {
 
     advanceClock(2 * 60_000 + 1);
     await rejectsWithStatus(resetPassword({ email: "juana@example.com", code: real, newPassword: "NewPass1!" }, deps), 400);
+});
+
+// --- forgot-password answers before any email work (timing) ---------------
+
+// Collects scheduled tasks instead of running them, so a test can check what
+// the caller got back before any lookup or email happened.
+function captureSchedule() {
+    const tasks: { label: string; task: () => Promise<unknown> }[] = [];
+    return {
+        tasks,
+        schedule(label: string, task: () => Promise<unknown>) {
+            tasks.push({ label, task });
+        },
+        async runAll() {
+            for (const { task } of tasks.splice(0)) await task();
+        },
+    };
+}
+
+test("forgot-password answers before any lookup or email, identically for every kind of email", async () => {
+    // An email provider that never answers: the response must not wait on it.
+    const { deps, sentEmails } = createFakeDeps({ sendResetEmail: () => new Promise<void>(() => {}) });
+    const { tasks, schedule } = captureSchedule();
+
+    const responses = ["juana@example.com", "nobody@example.com", "google.only@example.com"].map((email) =>
+        startPasswordResetRequest({ email }, deps, schedule)
+    );
+
+    for (const response of responses) {
+        assert.deepEqual(response, { message: FORGOT_PASSWORD_MESSAGE, resendCooldownSeconds: 60 });
+    }
+    assert.equal(tasks.length, 3, "every request schedules the same background task");
+    assert.ok(tasks.every((t) => t.label === "password reset request"), "the label never contains the email");
+    assert.equal(sentEmails.length, 0, "nothing was sent before answering");
+});
+
+test("the background task emails only an eligible account, and the code works once", async () => {
+    const { deps, sentEmails, lastCode } = createFakeDeps();
+    const { schedule, runAll } = captureSchedule();
+
+    startPasswordResetRequest({ email: "juana@example.com" }, deps, schedule);
+    startPasswordResetRequest({ email: "nobody@example.com" }, deps, schedule);
+    startPasswordResetRequest({ email: "google.only@example.com" }, deps, schedule);
+    await runAll();
+
+    assert.deepEqual(sentEmails.map((e) => e.to), ["juana@example.com"]);
+
+    const code = lastCode();
+    await resetPassword({ email: "juana@example.com", code, newPassword: "NewPass1!" }, deps);
+    await rejectsWithStatus(
+        resetPassword({ email: "juana@example.com", code, newPassword: "Other1!x" }, deps),
+        400,
+        INVALID_RESET_CODE_MESSAGE
+    );
+});
+
+test("the 60-second cooldown still applies when sending in the background", async () => {
+    const { deps, sentEmails, advanceClock } = createFakeDeps();
+    const { schedule, runAll } = captureSchedule();
+
+    startPasswordResetRequest({ email: "juana@example.com" }, deps, schedule);
+    await runAll();
+    advanceClock(30_000);
+    startPasswordResetRequest({ email: "juana@example.com" }, deps, schedule);
+    await runAll();
+    assert.equal(sentEmails.length, 1, "a second request inside the cooldown sends nothing");
+
+    advanceClock(30_001);
+    startPasswordResetRequest({ email: "juana@example.com" }, deps, schedule);
+    await runAll();
+    assert.equal(sentEmails.length, 2, "after the cooldown a new code is sent");
+});
+
+test("a failed background send leaves no code behind and never surfaces the code", async (t) => {
+    const lines = captureConsole(t);
+    const { deps, resetRows } = createFakeDeps({
+        sendResetEmail: async () => {
+            throw new Error("provider down");
+        },
+    });
+    const { schedule, runAll } = captureSchedule();
+
+    const response = startPasswordResetRequest({ email: "juana@example.com" }, deps, schedule);
+    assert.equal(response.message, FORGOT_PASSWORD_MESSAGE);
+
+    await runAll(); // must not throw
+    assert.equal(resetRows.size, 0, "no code is saved when the email didn't go out");
+    assert.ok(lines.every((line) => !/\b\d{6}\b/.test(line)), "no 6-digit code is ever logged");
 });

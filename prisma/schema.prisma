@@ -23,6 +23,11 @@ model User {
   role               String     @default("citizen")
   unit               String?    // responder org classification: "BDRRMO" | "MDRRMO" -- unset for non-responders
   pushToken          String?
+  // Bumped on every password change/reset. Each JWT carries the version it
+  // was issued with, and authenticate rejects a stale one -- so changing the
+  // password logs out every other session. Tokens issued before this column
+  // existed carry no version and count as 0.
+  tokenVersion       Int        @default(0)
   isOnDuty           Boolean    @default(true)
   latitude           Float?     // responder's last-known GPS position, for live incident tracking
   longitude          Float?

@@ -1,7 +1,9 @@
 import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
-import { emitAdminResponderDutyChanged } from "@/realtime/emit";
+import { disconnectUserSockets, emitAdminResponderDutyChanged } from "@/realtime/emit";
+import { changePassword } from "@/services/changePasswordFlow";
+import { issueSessionToken, passwordUpdateData } from "@/services/sessionAuth";
 
 export const userService = {
     async getById(userId: string) {
@@ -50,27 +52,24 @@ export const userService = {
         };
     },
 
-    async changePassword(
-        userId: string,
-        data: { oldPassword: string; newPassword: string }
-    ) {
-        const user = await prisma.user.findUnique({ where: { id: userId } });
-        if (!user) throw new AppError("User not found", 404);
-
-        if (!user.password) {
-            throw new AppError(
-                "This account uses Google Sign-In and has no password to change.",
-                403
-            );
-        }
-
-        const isMatch = await bcrypt.compare(data.oldPassword, user.password);
-        if (!isMatch) throw new AppError("Old password is incorrect", 403);
-
-        const hashedPassword = await bcrypt.hash(data.newPassword, 10);
-        await prisma.user.update({
-            where: { id: userId },
-            data: { password: hashedPassword },
+    // Logs out every other session for this user and returns a fresh token
+    // for the caller's own device (see changePasswordFlow.ts).
+    changePassword(userId: string, data: { oldPassword: string; newPassword: string }) {
+        return changePassword(userId, data, {
+            findUser: (id) =>
+                prisma.user.findUnique({ where: { id }, select: { id: true, password: true } }),
+            compareHash: (value, hash) => bcrypt.compare(value, hash),
+            hash: (value) => bcrypt.hash(value, 10),
+            savePasswordAndRevokeSessions: (id, passwordHash) =>
+                prisma.user.update({
+                    where: { id },
+                    data: passwordUpdateData(passwordHash),
+                    select: { id: true, tokenVersion: true },
+                }),
+            issueToken: issueSessionToken,
+            // Drops this user's open sockets too -- including this device's,
+            // which reopens them with the fresh token it gets back.
+            onPasswordChanged: disconnectUserSockets,
         });
     },
 
