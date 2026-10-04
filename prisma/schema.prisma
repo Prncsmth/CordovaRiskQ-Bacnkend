@@ -49,6 +49,18 @@ model PendingRegistration {
   updatedAt    DateTime @updatedAt
 }
 
+// One active forgot-password code per email (a new request replaces it).
+// Keyed by email like PendingRegistration; deleted once used or exhausted.
+model PasswordResetOtp {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  otpHash      String
+  otpExpiresAt DateTime
+  attempts     Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
 model SosAlert {
   id        String   @id @default(uuid())
   userId    String

@@ -12,6 +12,8 @@ import {
     requestRegistrationOtpSchema,
     resendRegistrationOtpSchema,
     verifyRegistrationOtpSchema,
+    forgotPasswordSchema,
+    resetPasswordSchema,
 } from "@/validations/auth.validation";
 
 const router = Router();
@@ -36,6 +38,21 @@ router.post(
     verifyOtpLimiter,
     validate(verifyRegistrationOtpSchema),
     authController.verifyRegistrationOtp
+);
+// Forgot password: emails a 6-digit code (same limiter as the other
+// code-sending routes), then reset-password checks it (same limiter as
+// verify-otp, capping code guessing per IP on top of the per-code limit).
+router.post(
+    "/auth/forgot-password",
+    requestOtpLimiter,
+    validate(forgotPasswordSchema),
+    authController.forgotPassword
+);
+router.post(
+    "/auth/reset-password",
+    verifyOtpLimiter,
+    validate(resetPasswordSchema),
+    authController.resetPassword
 );
 router.post("/auth/login", loginLimiter, validate(loginSchema), authController.login);
 router.post(

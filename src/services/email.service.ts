@@ -1,5 +1,6 @@
 // src/services/email.service.ts
-// Sends CORDOVA RISKQ's registration OTP over HTTPS -- never raw SMTP.
+// Sends CORDOVA RISKQ's 6-digit codes (registration and password reset)
+// over HTTPS -- never raw SMTP.
 // Render's free tier blocks outbound SMTP ports 25/465/587, which is why a
 // prior Gmail/nodemailer version hung indefinitely instead of failing.
 //
@@ -32,6 +33,24 @@ export function buildOtpEmailText(code: string, expiryMinutes: number): string {
     ].join("\n");
 }
 
+export const PASSWORD_RESET_EMAIL_SUBJECT = "Your CORDOVA RISKQ Password Reset Code";
+
+export function buildPasswordResetEmailText(code: string, expiryMinutes: number): string {
+    return [
+        "Your CORDOVA RISKQ password reset code is:",
+        "",
+        code,
+        "",
+        `This code expires in ${expiryMinutes} minutes.`,
+        "",
+        "If you did not request a password reset, you can ignore this email -- your password will not change.",
+    ].join("\n");
+}
+
+// What every provider sends: one plain-text email. The text carries the
+// code, so it is never logged.
+type EmailMessage = { to: string; subject: string; text: string };
+
 function readFromAddress(fallback: string): string {
     return process.env.EMAIL_FROM?.trim() || fallback;
 }
@@ -63,20 +82,13 @@ function getResendClient(): ResendClient {
 }
 
 async function sendViaResend(
-    to: string,
-    code: string,
-    expiryMinutes: number,
+    message: EmailMessage,
     deps: { client: ResendClient; from: string } | null,
 ): Promise<void> {
     const resend = deps?.client ?? getResendClient();
     const from = deps?.from ?? readFromAddress("CORDOVA RISKQ <onboarding@resend.dev>");
 
-    const { error } = await resend.emails.send({
-        from,
-        to,
-        subject: OTP_EMAIL_SUBJECT,
-        text: buildOtpEmailText(code, expiryMinutes),
-    });
+    const { error } = await resend.emails.send({ from, ...message });
 
     if (error) {
         // The SDK resolves { data, error } instead of rejecting on a failed
@@ -108,9 +120,7 @@ function mailgunConfig(): { apiKey: string; domain: string } {
 }
 
 async function sendViaMailgun(
-    to: string,
-    code: string,
-    expiryMinutes: number,
+    message: EmailMessage,
     deps: { fetchImpl: MailgunFetch; from: string } | null,
 ): Promise<void> {
     const { apiKey, domain } = mailgunConfig();
@@ -119,9 +129,9 @@ async function sendViaMailgun(
 
     const form = new FormData();
     form.set("from", from);
-    form.set("to", to);
-    form.set("subject", OTP_EMAIL_SUBJECT);
-    form.set("text", buildOtpEmailText(code, expiryMinutes));
+    form.set("to", message.to);
+    form.set("subject", message.subject);
+    form.set("text", message.text);
 
     // Basic auth per Mailgun's API: username "api", password the API key.
     // Built here (never logged) rather than via a library helper.
@@ -170,6 +180,16 @@ function readEmailProvider(): "resend" | "mailgun" {
     return process.env.EMAIL_PROVIDER?.trim().toLowerCase() === "mailgun" ? "mailgun" : "resend";
 }
 
+// Routes a message to whichever provider EMAIL_PROVIDER selects. Shared by
+// the registration and password-reset emails so they can never diverge in
+// provider, sender, timeout or error handling.
+function sendEmail(message: EmailMessage, deps: SendOtpEmailDeps | null): Promise<void> {
+    if (readEmailProvider() === "mailgun") {
+        return sendViaMailgun(message, deps && "fetchImpl" in deps ? deps : null);
+    }
+    return sendViaResend(message, deps && "client" in deps ? deps : null);
+}
+
 export async function sendOtpEmail(
     to: string,
     code: string,
@@ -178,8 +198,17 @@ export async function sendOtpEmail(
     // provider EMAIL_PROVIDER selects.
     deps: SendOtpEmailDeps | null = null,
 ): Promise<void> {
-    if (readEmailProvider() === "mailgun") {
-        return sendViaMailgun(to, code, expiryMinutes, deps && "fetchImpl" in deps ? deps : null);
-    }
-    return sendViaResend(to, code, expiryMinutes, deps && "client" in deps ? deps : null);
+    return sendEmail({ to, subject: OTP_EMAIL_SUBJECT, text: buildOtpEmailText(code, expiryMinutes) }, deps);
+}
+
+export async function sendPasswordResetEmail(
+    to: string,
+    code: string,
+    expiryMinutes: number,
+    deps: SendOtpEmailDeps | null = null,
+): Promise<void> {
+    return sendEmail(
+        { to, subject: PASSWORD_RESET_EMAIL_SUBJECT, text: buildPasswordResetEmailText(code, expiryMinutes) },
+        deps,
+    );
 }

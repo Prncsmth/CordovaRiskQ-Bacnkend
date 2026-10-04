@@ -29,10 +29,23 @@ export const resendRegistrationOtpSchema = z.object({
     email: emailField,
 });
 
+const otpCodeField = z
+    .string()
+    .length(6, "Code must be 6 digits")
+    .regex(/^\d{6}$/, "Code must be 6 digits");
+
 export const verifyRegistrationOtpSchema = z.object({
     email: emailField,
-    code: z
-        .string()
-        .length(6, "Code must be 6 digits")
-        .regex(/^\d{6}$/, "Code must be 6 digits"),
+    code: otpCodeField,
+});
+
+export const forgotPasswordSchema = z.object({
+    email: emailField,
+});
+
+// newPassword follows the same shared policy as registration.
+export const resetPasswordSchema = z.object({
+    email: emailField,
+    code: otpCodeField,
+    newPassword: passwordField,
 });

@@ -4,8 +4,11 @@ import { test } from "node:test";
 import { AppError } from "@/utils/AppError";
 import {
     OTP_EMAIL_SUBJECT,
+    PASSWORD_RESET_EMAIL_SUBJECT,
     buildOtpEmailText,
+    buildPasswordResetEmailText,
     sendOtpEmail,
+    sendPasswordResetEmail,
     type MailgunFetch,
     type ResendClient,
 } from "@/services/email.service";
@@ -203,6 +206,71 @@ test("a Mailgun request that times out becomes a 502 AppError and never logs the
             const output = logged.join("\n");
             assert.match(output, /timed out/);
             assert.doesNotMatch(output, /test-mailgun-key/);
+        } finally {
+            console.error = original;
+        }
+    }));
+
+// --- Password reset email ---------------------------------------------------
+
+test("the password reset email has its own subject and states the code and its expiry", () => {
+    assert.equal(PASSWORD_RESET_EMAIL_SUBJECT, "Your CORDOVA RISKQ Password Reset Code");
+    const text = buildPasswordResetEmailText("482019", 10);
+    assert.match(text, /password reset code is:/i);
+    assert.match(text, /^482019$/m);
+    assert.match(text, /expires in 10 minutes/);
+    assert.match(text, /did not request a password reset/i);
+});
+
+test("sendPasswordResetEmail sends via Resend with the reset subject and code", () =>
+    withEnv({ EMAIL_PROVIDER: undefined }, async () => {
+        const sent: { from: string; to: string; subject: string; text: string }[] = [];
+        const fakeClient: ResendClient = {
+            emails: {
+                send: async (message) => {
+                    sent.push(message);
+                    return { data: { id: "fake" }, error: null };
+                },
+            },
+        };
+
+        await sendPasswordResetEmail("juana@example.com", "482019", 10, { client: fakeClient, from: "x" });
+
+        assert.equal(sent.length, 1);
+        assert.equal(sent[0].to, "juana@example.com");
+        assert.equal(sent[0].subject, PASSWORD_RESET_EMAIL_SUBJECT);
+        assert.match(sent[0].text, /482019/);
+    }));
+
+test("sendPasswordResetEmail sends via Mailgun with the reset subject when EMAIL_PROVIDER=mailgun", () =>
+    withEnv({ EMAIL_PROVIDER: "mailgun", MAILGUN_API_KEY: "test-mailgun-key", MAILGUN_DOMAIN: "sandbox123.mailgun.org" }, async () => {
+        const forms: FormData[] = [];
+        const fakeFetch: MailgunFetch = (async (_url: string, init?: RequestInit) => {
+            forms.push(init!.body as FormData);
+            return new Response(null, { status: 200 });
+        }) as MailgunFetch;
+
+        await sendPasswordResetEmail("juana@example.com", "482019", 10, { fetchImpl: fakeFetch, from: "x" });
+
+        assert.equal(forms.length, 1);
+        assert.equal(forms[0].get("subject"), PASSWORD_RESET_EMAIL_SUBJECT);
+        assert.match(String(forms[0].get("text")), /482019/);
+    }));
+
+test("a failed password reset email becomes a 502 AppError and never logs the code", () =>
+    withEnv({ EMAIL_PROVIDER: "resend" }, async () => {
+        const logged: string[] = [];
+        const original = console.error;
+        console.error = (...args: unknown[]) => void logged.push(JSON.stringify(args));
+        try {
+            const fakeClient: ResendClient = {
+                emails: { send: async () => ({ data: null, error: { message: "Invalid API key" } }) },
+            };
+            await assert.rejects(
+                sendPasswordResetEmail("juana@example.com", "482019", 10, { client: fakeClient, from: "x" }),
+                (err: unknown) => err instanceof AppError && err.statusCode === 502,
+            );
+            assert.doesNotMatch(logged.join("\n"), /482019/);
         } finally {
             console.error = original;
         }

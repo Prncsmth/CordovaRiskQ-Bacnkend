@@ -90,7 +90,8 @@ function normalizeEmail(email: string): string {
     return email.trim().toLowerCase();
 }
 
-function generateOtp(): string {
+// Also used by passwordResetFlow.ts, so both flows share one generator.
+export function generateOtp(): string {
     // Cryptographically secure; 0..999_999 padded, so "000123" is possible.
     // randomInt's upper bound is exclusive.
     return crypto.randomInt(0, 1_000_000).toString().padStart(6, "0");
