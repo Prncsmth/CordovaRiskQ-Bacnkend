@@ -3,6 +3,7 @@ import { AppError } from "@/utils/AppError";
 import { haversineDistanceKm } from "@/utils/geo";
 import { pickAcceptedByResponderId, type ResponderRosterStatus } from "@/services/incidentRoster";
 import { emitResponderLocationUpdate, emitAdminResponderLocation } from "@/realtime/emit";
+import { primaryContact } from "@/services/trackingContact";
 import {
     activeTrackingRoster,
     LOCATION_SHARING_STATUSES,
@@ -122,7 +123,17 @@ export const trackingService = {
         );
         const users = await prisma.user.findMany({
             where: { id: { in: roster.map((r) => r.responderId) } },
-            select: { id: true, name: true, latitude: true, longitude: true, locationUpdatedAt: true },
+            select: {
+                id: true,
+                name: true,
+                latitude: true,
+                longitude: true,
+                locationUpdatedAt: true,
+                // Read for the primary responder's contact only (below) --
+                // never copied into the per-responder `responders` entries.
+                mobile: true,
+                unit: true,
+            },
         });
         const usersById = new Map(users.map((u) => [u.id, u]));
 
@@ -150,7 +161,12 @@ export const trackingService = {
             // The first-accepted responder, flat -- unchanged, for app
             // versions that only track one responder.
             ...primary,
-            // Every responder currently helping (Track Responders).
+            // That same primary responder's contact, for the single Call
+            // Responder button (null when no usable number is saved). Only
+            // the primary's -- this endpoint is reporter-only (403 above).
+            ...primaryContact(usersById.get(acceptedByResponderId)),
+            // Every responder currently helping (Track Responders). Built
+            // field by field above, so it never includes a phone number.
             responders,
         };
     },
