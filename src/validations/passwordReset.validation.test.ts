@@ -30,7 +30,7 @@ test("reset-password requires exactly 6 digits for the code", () => {
 test("reset-password enforces the shared password policy on newPassword", () => {
     const weak = {
         "too short": "Ab1!",
-        "too long": "Abcdefgh1!xyz",
+        "too long": "Ab1!" + "x".repeat(61), // 65 characters
         "no uppercase": "newpass1!",
         "no lowercase": "NEWPASS1!",
         "no number": "NewPass!!",
