@@ -41,6 +41,11 @@ export const announcementController = {
         res.status(201).json({ success: true, announcement });
     }),
 
+    update: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        const announcement = await announcementService.update(req.params.id as string, req.body);
+        res.status(200).json({ success: true, announcement });
+    }),
+
     remove: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
         await announcementService.remove(req.params.id as string);
         res.status(200).json({ success: true });

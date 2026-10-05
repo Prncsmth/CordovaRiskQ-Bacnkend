@@ -122,6 +122,37 @@ export const announcementService = {
         return announcement;
     },
 
+    // Updates the announcement's own fields only -- deliberately doesn't
+    // re-run create()'s notification fan-out, since an edit (e.g. fixing a
+    // typo) re-pushing to every citizen/responder/admin again would be
+    // spammy and surprising. The original publish notification already
+    // reached its audience; editing the content afterward doesn't warrant
+    // a second one.
+    async update(
+        id: string,
+        data: {
+            title: string;
+            content: string;
+            priority: string;
+            audience: string;
+            barangayName?: string;
+        }
+    ) {
+        const existing = await prisma.announcement.findUnique({ where: { id } });
+        if (!existing) throw new AppError("Announcement not found", 404);
+
+        return prisma.announcement.update({
+            where: { id },
+            data: {
+                title: data.title,
+                content: data.content,
+                priority: data.priority,
+                audience: data.audience,
+                barangayName: data.barangayName ?? null,
+            },
+        });
+    },
+
     async remove(id: string) {
         const existing = await prisma.announcement.findUnique({ where: { id } });
         if (!existing) throw new AppError("Announcement not found", 404);

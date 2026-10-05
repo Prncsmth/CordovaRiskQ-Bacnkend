@@ -19,7 +19,8 @@ type NotificationData = {
         | "tide_risk"
         | "new_incident"
         | "roster_update"
-        | "team_ring";
+        | "team_ring"
+        | "support_status";
     title: string;
     body: string;
     referenceId?: string;
