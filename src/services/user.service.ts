@@ -16,6 +16,13 @@ export const userService = {
             name: user.name,
             email: user.email,
             mobile: user.mobile,
+            // False for an account created through Google Sign-In, which has
+            // no password -- the app hides Change Password for it.
+            hasPassword: user.password !== null,
+            // True for any account that signs in with Google -- Google-only,
+            // or an email/password account later linked to Google. The app
+            // shows its password row as "Password (Google Account)".
+            isGoogleAccount: user.googleId !== null,
         };
     },
 
