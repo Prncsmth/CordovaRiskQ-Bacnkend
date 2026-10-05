@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const createAnnouncementSchema = z
+const announcementFields = z
     .object({
         title: z.string().min(1, "Title is required"),
         content: z.string().min(1, "Content is required"),
@@ -24,3 +24,10 @@ export const createAnnouncementSchema = z
             });
         }
     });
+
+export const createAnnouncementSchema = announcementFields;
+// Same shape as create -- an edit replaces the announcement's fields
+// wholesale (matches the admin form, which reuses its own title/content/
+// priority/audience/barangay state for both publishing and editing), not a
+// partial patch.
+export const updateAnnouncementSchema = announcementFields;

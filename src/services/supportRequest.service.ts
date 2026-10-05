@@ -1,11 +1,26 @@
 import { prisma } from "@/lib/prisma";
 import { emitAdminActivity, emitAdminSupportRequest } from "@/realtime/emit";
 import { supportRequestDetail } from "@/services/adminActivity";
+import { notificationService } from "@/services/notification.service";
 import { AppError } from "@/utils/AppError";
 
 // role lets the admin panel tell a responder's request from a citizen's --
 // the mobile app's Contact Support form is the same for both.
 const REQUESTER_SELECT = { id: true, name: true, email: true, mobile: true, role: true } as const;
+
+// Mirrors incident.service.ts's STATUS_NOTIFICATION_COPY pattern -- "open" is
+// the state every request already starts in, so there's no transition into
+// it worth notifying about, only the two an admin actually moves it to.
+const SUPPORT_STATUS_NOTIFICATION_COPY: Partial<Record<string, { title: string; body: string }>> = {
+    in_progress: {
+        title: "Support request in progress",
+        body: "An admin is now looking into your support request.",
+    },
+    resolved: {
+        title: "Support request resolved",
+        body: "Your support request has been resolved.",
+    },
+};
 
 export const supportRequestService = {
     async create(userId: string, data: { topic: string; subject?: string; message: string }) {
@@ -105,6 +120,16 @@ export const supportRequestService = {
             userName: updated.user.name,
             userRole: updated.user.role,
         });
+
+        const copy = SUPPORT_STATUS_NOTIFICATION_COPY[updated.status];
+        if (copy) {
+            await notificationService.createForUsers([updated.userId], {
+                type: "support_status",
+                title: copy.title,
+                body: copy.body,
+                referenceId: updated.id,
+            });
+        }
 
         return updated;
     },

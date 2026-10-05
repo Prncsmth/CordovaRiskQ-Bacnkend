@@ -4,7 +4,7 @@ import { authenticate, optionalAuthenticate } from "@/middlewares/authenticate.m
 import { requireAdmin } from "@/middlewares/requireAdmin.middleware";
 import { requireResponder } from "@/middlewares/requireResponder.middleware";
 import { validate } from "@/middlewares/validate.middleware";
-import { createAnnouncementSchema } from "@/validations/announcement.validation";
+import { createAnnouncementSchema, updateAnnouncementSchema } from "@/validations/announcement.validation";
 
 const router = Router();
 
@@ -31,6 +31,13 @@ router.post(
     requireAdmin,
     validate(createAnnouncementSchema),
     announcementController.create
+);
+router.patch(
+    "/admin/announcements/:id",
+    authenticate,
+    requireAdmin,
+    validate(updateAnnouncementSchema),
+    announcementController.update
 );
 router.delete("/admin/announcements/:id", authenticate, requireAdmin, announcementController.remove);
 
