@@ -7,7 +7,7 @@ import { passwordField } from "./password.schema";
 const PH_MOBILE_REGEX = /^(\+639\d{9}|09\d{9})$/;
 
 export const updateProfileSchema = z.object({
-    name: z.string().optional(),
+    name: z.string().max(100, "Name is too long").optional(),
     // Optional and never written: the email can't be changed (see
     // services/accountEmail.ts). Older app versions still send the current
     // one, which the service accepts; a different one is rejected there.

@@ -2,8 +2,11 @@ import { z } from "zod";
 
 export const createIncidentSchema = z.object({
     category: z.enum(["flood", "fire", "medical", "road-accident", "other"]),
-    details: z.string().optional(),
-    locationLabel: z.string().min(1, "Location is required"),
+    details: z.string().max(1000, "Details must be 1000 characters or fewer").optional(),
+    locationLabel: z
+        .string()
+        .min(1, "Location is required")
+        .max(300, "Location must be 300 characters or fewer"),
     latitude: z.number(),
     longitude: z.number(),
     reporterLatitude: z.number(),

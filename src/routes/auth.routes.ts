@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authController } from "@/controllers/auth.controller";
 import { validate } from "@/middlewares/validate.middleware";
 import {
+    loginEmailLimiter,
     loginLimiter,
     requestOtpLimiter,
     verifyOtpLimiter,
@@ -54,7 +55,16 @@ router.post(
     validate(resetPasswordSchema),
     authController.resetPassword
 );
-router.post("/auth/login", loginLimiter, validate(loginSchema), authController.login);
+// IP limit first, then the per-email limit (failed attempts only) -- see
+// rateLimit.middleware.ts. Google sign-in has no email in the body, so it
+// keeps the IP limit alone.
+router.post(
+    "/auth/login",
+    loginLimiter,
+    loginEmailLimiter,
+    validate(loginSchema),
+    authController.login
+);
 router.post(
     "/auth/google",
     loginLimiter,

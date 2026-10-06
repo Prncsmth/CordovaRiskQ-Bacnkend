@@ -1,6 +1,5 @@
 import { Router } from "express";
 import healthRoutes from "@/routes/health.routes";
-import testRoutes from "@/routes/test.routes";
 import authRoutes from "@/routes/auth.routes";
 import userRoutes from "@/routes/user.routes";
 import sosRoutes from "@/routes/sos.routes";
@@ -20,7 +19,6 @@ import supportRequestRoutes from "@/routes/supportRequest.routes";
 const router = Router();
 
 router.use(healthRoutes);
-router.use(testRoutes);
 router.use(authRoutes);
 router.use(userRoutes);
 router.use(sosRoutes);

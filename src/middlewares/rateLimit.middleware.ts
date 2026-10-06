@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Request } from "express";
 import rateLimit, { ipKeyGenerator } from "express-rate-limit";
 import type { AuthenticatedRequest } from "@/middlewares/authenticate.middleware";
@@ -36,6 +37,44 @@ export const loginLimiter = createRateLimiter(
     5,
     "Too many login attempts. Please try again in a minute."
 );
+
+// Second login limit, per email instead of per IP: the IP limit above alone
+// lets someone spread password guesses for ONE account across many IPs.
+// - Keyed by a SHA-256 of the normalized email (trimmed, lowercased -- the
+//   same normalization the login schema applies), so limiter state never
+//   holds the raw address, and never any password.
+// - Counts only FAILED attempts (skipSuccessfulRequests): a successful login
+//   isn't counted, so a user who logs in fine is never pushed toward it.
+// - Applies the same way whether or not the account exists, with the same
+//   message, so it reveals nothing about which emails are registered.
+// - Generous enough (10 wrong passwords in 15 minutes) that a real user
+//   fumbling their password isn't locked out, while capping a distributed
+//   guessing run at ~40 tries an hour per account.
+// Runs before validation, so a missing/non-string email falls back to the
+// IP key rather than every such request sharing one bucket.
+export const LOGIN_EMAIL_LIMIT = { windowMs: 15 * 60 * 1000, max: 10 } as const;
+
+export function loginEmailKey(req: Request): string {
+    const raw = (req.body as { email?: unknown } | undefined)?.email;
+    if (typeof raw !== "string" || raw.trim() === "") {
+        return `ip:${ipKeyGenerator(req.ip ?? "")}`;
+    }
+    const normalized = raw.trim().toLowerCase();
+    return `email:${createHash("sha256").update(normalized).digest("hex")}`;
+}
+
+export const loginEmailLimiter = rateLimit({
+    windowMs: LOGIN_EMAIL_LIMIT.windowMs,
+    max: LOGIN_EMAIL_LIMIT.max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: true,
+    keyGenerator: loginEmailKey,
+    message: {
+        success: false,
+        message: "Too many failed login attempts for this email. Please try again in 15 minutes.",
+    },
+});
 
 export const registerLimiter = createRateLimiter(
     60 * 1000,
