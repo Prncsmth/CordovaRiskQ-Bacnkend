@@ -5,3 +5,8 @@ node_modules
 /src/generated/prisma
 
 .worktrees
+
+# TypeScript build output (tsc). Render builds a fresh dist/ on every deploy
+# (npm run build) and starts from src/server.ts via tsx, so it is never
+# needed in git.
+dist/
