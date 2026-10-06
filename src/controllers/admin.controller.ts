@@ -18,6 +18,7 @@ export const adminController = {
             role: queryString(req.query.role),
             duty: queryBool(req.query.duty),
             unit: queryString(req.query.unit),
+            barangay: queryString(req.query.barangay),
             page: queryInt(req.query.page),
             limit: queryInt(req.query.limit),
         });
@@ -36,6 +37,11 @@ export const adminController = {
 
     updateUserRole: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
         const user = await adminService.updateUserRole(req.params.id as string, req.body.role, req.body.unit);
+        res.status(200).json({ success: true, user });
+    }),
+
+    updateResponderBarangay: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        const user = await adminService.updateResponderBarangay(req.params.id as string, req.body.barangay);
         res.status(200).json({ success: true, user });
     }),
 

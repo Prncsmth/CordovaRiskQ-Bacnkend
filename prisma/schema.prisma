@@ -22,6 +22,11 @@ model User {
   mobile             String?
   role               String     @default("citizen")
   unit               String?    // responder org classification: "BDRRMO" | "MDRRMO" -- unset for non-responders
+  // Admin-assigned home barangay, one of CORDOVA_BARANGAY_NAMES -- not the
+  // responder's live GPS position (latitude/longitude below), which moves
+  // as they respond to incidents. Lets the admin dashboard filter "which
+  // responders cover Day-as" the way it already filters by unit.
+  assignedBarangay   String?
   pushToken          String?
   // Bumped on every password change/reset. Each JWT carries the version it
   // was issued with, and authenticate rejects a stale one -- so changing the
