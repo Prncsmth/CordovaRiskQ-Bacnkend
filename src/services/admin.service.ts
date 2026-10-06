@@ -11,6 +11,7 @@ export const adminService = {
         role?: string;
         duty?: boolean;
         unit?: string;
+        barangay?: string;
         page?: number;
         limit?: number;
     }) {
@@ -25,6 +26,11 @@ export const adminService = {
                 ? { unit: null }
                 : filters.unit
                   ? { unit: filters.unit }
+                  : {}),
+            ...(filters.barangay === "unassigned"
+                ? { assignedBarangay: null }
+                : filters.barangay
+                  ? { assignedBarangay: filters.barangay }
                   : {}),
             ...(filters.search
                 ? {
@@ -57,6 +63,7 @@ export const adminService = {
                 mobile: user.mobile,
                 role: user.role,
                 unit: user.unit,
+                assignedBarangay: user.assignedBarangay,
                 isOnDuty: user.isOnDuty,
                 createdAt: user.createdAt,
             })),
@@ -78,6 +85,7 @@ export const adminService = {
             mobile: user.mobile,
             role: user.role,
             unit: user.unit,
+            assignedBarangay: user.assignedBarangay,
             isOnDuty: user.isOnDuty,
             createdAt: user.createdAt,
         };
@@ -115,6 +123,28 @@ export const adminService = {
             role: updated.role,
             unit: updated.unit,
             createdAt: updated.createdAt,
+        };
+    },
+
+    // Admin-set home barangay (not the responder's own self-service action --
+    // there's no mobile UI for this), independent of role/unit since an
+    // already-classified responder's coverage area can change without a
+    // promotion happening alongside it.
+    async updateResponderBarangay(targetUserId: string, barangay: string | null) {
+        const target = await prisma.user.findUnique({ where: { id: targetUserId } });
+        if (!target) throw new AppError("User not found", 404);
+        if (target.role !== "responder") {
+            throw new AppError("Only responders can have an assigned barangay", 400);
+        }
+
+        const updated = await prisma.user.update({
+            where: { id: targetUserId },
+            data: { assignedBarangay: barangay },
+        });
+
+        return {
+            id: updated.id,
+            assignedBarangay: updated.assignedBarangay,
         };
     },
 

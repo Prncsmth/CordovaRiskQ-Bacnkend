@@ -6,7 +6,7 @@ import { requireAdmin } from "@/middlewares/requireAdmin.middleware";
 import { loginLimiter } from "@/middlewares/rateLimit.middleware";
 import { validate } from "@/middlewares/validate.middleware";
 import { loginSchema } from "@/validations/auth.validation";
-import { updateUserRoleSchema } from "@/validations/admin.validation";
+import { updateResponderBarangaySchema, updateUserRoleSchema } from "@/validations/admin.validation";
 
 const router = Router();
 
@@ -23,6 +23,13 @@ router.patch(
     requireAdmin,
     validate(updateUserRoleSchema),
     adminController.updateUserRole
+);
+router.patch(
+    "/admin/users/:id/barangay",
+    authenticate,
+    requireAdmin,
+    validate(updateResponderBarangaySchema),
+    adminController.updateResponderBarangay
 );
 router.get("/admin/responders/summary", authenticate, requireAdmin, adminController.getResponderSummary);
 router.get("/admin/responders/en-route", authenticate, requireAdmin, adminController.listEnRouteResponders);
