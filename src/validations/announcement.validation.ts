@@ -2,8 +2,14 @@ import { z } from "zod";
 
 const announcementFields = z
     .object({
-        title: z.string().min(1, "Title is required"),
-        content: z.string().min(1, "Content is required"),
+        title: z
+            .string()
+            .min(1, "Title is required")
+            .max(150, "Title must be 150 characters or fewer"),
+        content: z
+            .string()
+            .min(1, "Content is required")
+            .max(5000, "Content must be 5000 characters or fewer"),
         priority: z.enum(["Normal", "Urgent"]),
         audience: z.enum(["All Users", "Responders Only", "Specific Barangay"]),
         barangayName: z.string().min(1).optional(),
