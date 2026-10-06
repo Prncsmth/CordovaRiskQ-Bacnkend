@@ -141,6 +141,55 @@ test("loginWithGoogle refuses an admin matched by email before linking the Googl
     assert.equal(calls.create, 0);
 });
 
+function stubGoogleToken(email: string) {
+    mock.method(OAuth2Client.prototype, "verifyIdToken", (async () => ({
+        getPayload: () => ({ email, email_verified: true, name: "A", sub: "google-sub" }),
+    })) as never);
+}
+
+test("loginWithGoogle refuses an admin already linked by googleId (403, nothing written)", async () => {
+    stubGoogleToken("admin@example.com");
+    stub("findUnique", async () => makeUser("admin", { googleId: "google-sub" }));
+    stub("findFirst", async () => {
+        throw new Error("findFirst must not be reached");
+    });
+    stub("update", async () => {
+        throw new Error("update must not be called");
+    });
+    stub("create", async () => {
+        throw new Error("create must not be called");
+    });
+
+    const err = await rejection(authService.loginWithGoogle("token"));
+    assert.equal(err.statusCode, 403);
+    assert.equal(err.message, ADMIN_APP_LOGIN_MESSAGE);
+    assert.equal(calls.update, 0);
+    assert.equal(calls.create, 0);
+});
+
+test("loginWithGoogle links an existing citizen matched by email", async () => {
+    stubGoogleToken("citizen@example.com");
+    stub("findUnique", async () => null);
+    stubFindFirst(makeUser("citizen"));
+    stub("update", async () => makeUser("citizen", { googleId: "google-sub" }));
+    stub("create", async () => {
+        throw new Error("create must not be called");
+    });
+
+    const result = await authService.loginWithGoogle("token");
+    assert.equal(calls.update, 1);
+    assert.equal(calls.create, 0);
+    assert.equal(result.isNewUser, false);
+    assert.deepEqual(result.user, {
+        id: "id-citizen",
+        email: "citizen@example.com",
+        name: "Test User",
+        role: "citizen",
+        isOnDuty: false,
+    });
+    assert.ok(result.token.length > 0);
+});
+
 test("stubbed delegates are restored after each test", () => {
     assert.equal(typeof prisma.user.findFirst, "function");
     assert.equal(calls.findFirst, 0);

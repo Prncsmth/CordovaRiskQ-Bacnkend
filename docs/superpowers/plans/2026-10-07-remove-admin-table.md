@@ -536,3 +536,18 @@ git commit -m "feat(auth): sign in through the admin-only /admin/auth/login"
 - [ ] **Step 6:** Start the dashboard, sign in as the admin, open a page that calls `/admin/*` (e.g. users list) — works. Then try the admin credentials in the mobile app — refused with the dashboard message.
 
 (Wait between curl batches if you hit 429 — `loginLimiter` allows 5 attempts per minute per IP.)
+
+## Deployment
+
+**Why order matters.** The migration's `tokenVersion` bump only helps if the new backend (which refuses admins on `/auth/login`) is already live. The old dashboard calls `/auth/login`, which the new backend answers with 403; the new dashboard calls `/admin/auth/login`, which the old backend answers with 404. So backend and dashboard must go out back to back.
+
+**Sequence.**
+
+1. Check `SELECT count(*) FROM "Admin";` and back up. The `DROP` is irreversible and should only discard the old seeded `super_admin` row.
+2. Deploy the backend.
+3. Deploy the dashboard (branch `feat/admin-login-endpoint` in the `cordova-riskq-admin` repo) immediately after.
+4. Apply the migration (`npx prisma migrate deploy`). It is safe last because no code references the Admin table.
+5. Run `npm run db:seed` if the seeded admin is needed. If it prints `(citizen)`, that email already belongs to a non-admin user.
+6. Run the Task 5 manual verification.
+
+**Runbook note.** When promoting a user to admin directly in the database, also bump their `tokenVersion` so any existing mobile session is revoked.
