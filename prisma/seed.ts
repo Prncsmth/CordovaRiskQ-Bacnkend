@@ -43,10 +43,12 @@ async function seedAdmin() {
 
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  const admin = await prisma.admin.upsert({
+  // Admins are User rows with role "admin" -- the role every admin check
+  // reads. They sign in through the dashboard's /admin/auth/login.
+  const admin = await prisma.user.upsert({
     where: { email },
     update: {},
-    create: { email, password: hashedPassword, name, role: "super_admin" },
+    create: { email, password: hashedPassword, name, role: "admin" },
   });
 
   console.log(`Seeded admin: ${admin.email} (${admin.role})`);
