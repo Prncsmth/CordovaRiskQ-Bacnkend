@@ -11,6 +11,7 @@ import {
     type ResponderRosterStatus,
 } from "@/services/incidentRoster";
 import { canCancelIncident, canViewIncident } from "@/services/incidentAuthorization";
+import { reporterContactFor } from "@/services/reporterContact";
 import { emitAdminActivity, emitAdminIncidentUpdate, emitIncidentUpdate } from "@/realtime/emit";
 import { resolveUrgency } from "@/services/incidentUrgency";
 import { ROSTER_NOTIFICATION_COPY } from "@/services/rosterNotificationCopy";
@@ -178,6 +179,18 @@ function buildResponderFacingIncident(
         responders: shaped.activeResponders,
         myStatus: myRow?.status ?? "pending",
     };
+}
+
+// The reporter's contact for one responder, given their own roster status --
+// null unless they're actively on the incident (see reporterContact.ts).
+// Only the reporter's name and mobile are read.
+async function loadReporterContact(reporterId: string, myStatus: string) {
+    if (!isActiveStatus(myStatus as ResponderRosterStatus)) return null;
+    const reporter = await prisma.user.findUnique({
+        where: { id: reporterId },
+        select: { name: true, mobile: true },
+    });
+    return reporterContactFor(myStatus as ResponderRosterStatus, reporter);
 }
 
 // Strips the per-viewer myStatus field buildResponderFacingIncident computes
@@ -381,7 +394,8 @@ export const incidentService = {
             };
         }
 
-        return buildResponderFacingIncident(incident, incident.responders, requesterId);
+        const result = buildResponderFacingIncident(incident, incident.responders, requesterId);
+        return { ...result, reporterContact: await loadReporterContact(incident.reporterId, result.myStatus) };
     },
 
     async updateMyResponderStatus(
@@ -454,7 +468,12 @@ export const incidentService = {
 
         const result = buildResponderFacingIncident(updatedIncident, allRows, responderId);
         emitAdminIncidentUpdate(toAdminIncidentPayload(result));
-        return result;
+        // Added after the admin broadcast, so the reporter's number only ever
+        // goes back to this responder -- never into a shared payload.
+        return {
+            ...result,
+            reporterContact: await loadReporterContact(updatedIncident.reporterId, result.myStatus),
+        };
     },
 
     async updateStatus(id: string, responderId: string, status: "completed" | "cancelled") {
