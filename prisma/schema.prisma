@@ -107,16 +107,6 @@ model IncidentResponder {
   @@unique([incidentId, responderId])
 }
 
-model Admin {
-  id        String   @id @default(uuid())
-  email     String   @unique
-  password  String
-  name      String
-  role      String   @default("admin") // "admin" | "super_admin"
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-}
-
 model TideStatus {
   id                 String    @id // always "current" -- singleton row, upserted in place
   seaLevelM          Float

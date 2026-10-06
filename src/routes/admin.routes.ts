@@ -1,11 +1,18 @@
 import { Router } from "express";
+import { authController } from "@/controllers/auth.controller";
 import { adminController } from "@/controllers/admin.controller";
 import { authenticate } from "@/middlewares/authenticate.middleware";
 import { requireAdmin } from "@/middlewares/requireAdmin.middleware";
+import { loginLimiter } from "@/middlewares/rateLimit.middleware";
 import { validate } from "@/middlewares/validate.middleware";
+import { loginSchema } from "@/validations/auth.validation";
 import { updateUserRoleSchema } from "@/validations/admin.validation";
 
 const router = Router();
+
+// The dashboard's own login -- public, unlike every route below. The mobile
+// app's /auth/login refuses admin accounts, so this is the only way in.
+router.post("/admin/auth/login", loginLimiter, validate(loginSchema), authController.adminLogin);
 
 router.get("/admin/users", authenticate, requireAdmin, adminController.listUsers);
 router.get("/admin/users/names", authenticate, requireAdmin, adminController.listUserNames);
