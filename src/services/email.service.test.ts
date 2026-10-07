@@ -9,7 +9,6 @@ import {
     buildPasswordResetEmailText,
     sendOtpEmail,
     sendPasswordResetEmail,
-    type MailgunFetch,
     type ResendClient,
 } from "@/services/email.service";
 
@@ -37,7 +36,7 @@ test("the OTP email has the CORDOVA RISKQ subject and states the code and its ex
     assert.match(text, /If you did not request this code, you can ignore this email\./);
 });
 
-// --- Resend (default provider) -----------------------------------------
+// --- Resend ------------------------------------------------------------
 
 test("with no EMAIL_PROVIDER set, sendOtpEmail uses Resend", () =>
     withEnv({ EMAIL_PROVIDER: undefined }, async () => {
@@ -53,7 +52,7 @@ test("with no EMAIL_PROVIDER set, sendOtpEmail uses Resend", () =>
 
         await sendOtpEmail("juana@example.com", "048213", 10, {
             client: fakeClient,
-            from: "CORDOVA RISKQ <onboarding@resend.dev>",
+            from: "CORDOVA RISKQ <no-reply@example.com>",
         });
 
         assert.equal(sent.length, 1);
@@ -105,110 +104,61 @@ test("a Resend send failure (the SDK's {data,error} contract, not a thrown error
         }
     }));
 
-// --- Mailgun (sandbox testing provider) ---------------------------------
+// --- Configuration ---------------------------------------------------------
+// These fail before any Resend client is created, so they never touch the network.
 
-test('EMAIL_PROVIDER="mailgun" sends via Mailgun\'s HTTPS API with Basic auth and form fields', () =>
-    withEnv({ EMAIL_PROVIDER: "mailgun", MAILGUN_API_KEY: "test-mailgun-key", MAILGUN_DOMAIN: "sandbox123.mailgun.org" }, async () => {
-        const calls: { url: string; init: RequestInit }[] = [];
-        const fakeFetch: MailgunFetch = (async (url: string, init?: RequestInit) => {
-            calls.push({ url, init: init! });
-            return new Response(null, { status: 200 });
-        }) as MailgunFetch;
-
-        await sendOtpEmail("juana@example.com", "048213", 10, {
-            fetchImpl: fakeFetch,
-            from: "CORDOVA RISKQ <otp@sandbox123.mailgun.org>",
+test("sendOtpEmail fails with a 500 AppError naming (never revealing) missing Resend settings", () =>
+    withEnv({ EMAIL_PROVIDER: "resend", RESEND_API_KEY: undefined, EMAIL_FROM: undefined }, async () => {
+        await assert.rejects(sendOtpEmail("juana@example.com", "048213", 10), (err: unknown) => {
+            assert.ok(err instanceof AppError);
+            assert.equal(err.statusCode, 500);
+            assert.match(err.message, /RESEND_API_KEY/);
+            assert.match(err.message, /EMAIL_FROM/);
+            return true;
         });
-
-        assert.equal(calls.length, 1);
-        assert.equal(calls[0].url, "https://api.mailgun.net/v3/sandbox123.mailgun.org/messages");
-        assert.equal(calls[0].init.method, "POST");
-
-        const headers = calls[0].init.headers as Record<string, string>;
-        assert.match(headers.Authorization, /^Basic /);
-        const decoded = Buffer.from(headers.Authorization.replace("Basic ", ""), "base64").toString();
-        assert.equal(decoded, "api:test-mailgun-key");
-
-        const form = calls[0].init.body as FormData;
-        assert.equal(form.get("to"), "juana@example.com");
-        assert.equal(form.get("from"), "CORDOVA RISKQ <otp@sandbox123.mailgun.org>");
-        assert.equal(form.get("subject"), OTP_EMAIL_SUBJECT);
-        assert.match(String(form.get("text")), /048213/);
     }));
 
-test("sendOtpEmail reads MAILGUN_DOMAIN from the environment when selecting the Mailgun provider", () =>
-    withEnv({ EMAIL_PROVIDER: "mailgun", MAILGUN_API_KEY: "test-mailgun-key", MAILGUN_DOMAIN: "sandbox123.mailgun.org" }, async () => {
-        const calls: string[] = [];
-        const fakeFetch: MailgunFetch = (async (url: string) => {
-            calls.push(url);
-            return new Response(null, { status: 200 });
-        }) as MailgunFetch;
-
-        await sendOtpEmail("juana@example.com", "048213", 10, { fetchImpl: fakeFetch, from: "x" });
-
-        assert.equal(calls[0], "https://api.mailgun.net/v3/sandbox123.mailgun.org/messages");
+test("a missing EMAIL_FROM fails instead of falling back to Resend's owner-only sandbox sender", () =>
+    withEnv({ EMAIL_PROVIDER: undefined, RESEND_API_KEY: "re_test_key", EMAIL_FROM: undefined }, async () => {
+        await assert.rejects(sendOtpEmail("juana@example.com", "048213", 10), (err: unknown) => {
+            assert.ok(err instanceof AppError);
+            assert.equal(err.statusCode, 500);
+            assert.match(err.message, /EMAIL_FROM/);
+            assert.doesNotMatch(err.message, /re_test_key/);
+            return true;
+        });
     }));
 
-test("sendOtpEmail fails with a 500 AppError naming (never revealing) missing Mailgun settings", () =>
-    withEnv({ EMAIL_PROVIDER: "mailgun", MAILGUN_API_KEY: undefined, MAILGUN_DOMAIN: undefined }, async () => {
-        await assert.rejects(
-            sendOtpEmail("juana@example.com", "048213", 10),
-            (err: unknown) => {
+test('a leftover EMAIL_PROVIDER="mailgun" fails loudly instead of sending through a removed provider', () =>
+    withEnv(
+        { EMAIL_PROVIDER: "mailgun", RESEND_API_KEY: "re_test_key", EMAIL_FROM: "CORDOVA RISKQ <no-reply@example.com>" },
+        async () => {
+            await assert.rejects(sendPasswordResetEmail("juana@example.com", "482019", 10), (err: unknown) => {
                 assert.ok(err instanceof AppError);
                 assert.equal(err.statusCode, 500);
-                assert.match(err.message, /MAILGUN_API_KEY/);
-                assert.match(err.message, /MAILGUN_DOMAIN/);
+                assert.match(err.message, /EMAIL_PROVIDER/);
                 return true;
+            });
+        },
+    ));
+
+test("OTP emails go to whichever address registers, not a single fixed recipient", () =>
+    withEnv({ EMAIL_PROVIDER: "resend" }, async () => {
+        const recipients: string[] = [];
+        const fakeClient: ResendClient = {
+            emails: {
+                send: async (message) => {
+                    recipients.push(message.to);
+                    return { data: { id: "fake" }, error: null };
+                },
             },
-        );
-    }));
+        };
+        const deps = { client: fakeClient, from: "CORDOVA RISKQ <no-reply@example.com>" };
 
-test("a non-2xx Mailgun response becomes a 502 AppError and logs the status/body but never the API key", () =>
-    withEnv({ EMAIL_PROVIDER: "mailgun", MAILGUN_API_KEY: "test-mailgun-key", MAILGUN_DOMAIN: "sandbox123.mailgun.org" }, async () => {
-        const logged: string[] = [];
-        const original = console.error;
-        console.error = (...args: unknown[]) => void logged.push(JSON.stringify(args));
-        try {
-            const fakeFetch: MailgunFetch = (async () =>
-                new Response("Recipient not authorized for sandbox domain", { status: 403 })) as MailgunFetch;
+        await sendOtpEmail("juana@gmail.com", "048213", 10, deps);
+        await sendOtpEmail("pedro@gmail.com", "593104", 10, deps);
 
-            await assert.rejects(
-                sendOtpEmail("juana@example.com", "048213", 10, { fetchImpl: fakeFetch, from: "x" }),
-                (err: unknown) => err instanceof AppError && err.statusCode === 502,
-            );
-
-            const output = logged.join("\n");
-            assert.match(output, /403/);
-            assert.match(output, /not authorized/);
-            assert.doesNotMatch(output, /test-mailgun-key/);
-        } finally {
-            console.error = original;
-        }
-    }));
-
-test("a Mailgun request that times out becomes a 502 AppError and never logs the API key", () =>
-    withEnv({ EMAIL_PROVIDER: "mailgun", MAILGUN_API_KEY: "test-mailgun-key", MAILGUN_DOMAIN: "sandbox123.mailgun.org" }, async () => {
-        const logged: string[] = [];
-        const original = console.error;
-        console.error = (...args: unknown[]) => void logged.push(JSON.stringify(args));
-        try {
-            const fakeFetch: MailgunFetch = (async () => {
-                const err = new Error("The operation was aborted");
-                err.name = "AbortError";
-                throw err;
-            }) as MailgunFetch;
-
-            await assert.rejects(
-                sendOtpEmail("juana@example.com", "048213", 10, { fetchImpl: fakeFetch, from: "x" }),
-                (err: unknown) => err instanceof AppError && err.statusCode === 502,
-            );
-
-            const output = logged.join("\n");
-            assert.match(output, /timed out/);
-            assert.doesNotMatch(output, /test-mailgun-key/);
-        } finally {
-            console.error = original;
-        }
+        assert.deepEqual(recipients, ["juana@gmail.com", "pedro@gmail.com"]);
     }));
 
 // --- Password reset email ---------------------------------------------------
@@ -240,21 +190,6 @@ test("sendPasswordResetEmail sends via Resend with the reset subject and code", 
         assert.equal(sent[0].to, "juana@example.com");
         assert.equal(sent[0].subject, PASSWORD_RESET_EMAIL_SUBJECT);
         assert.match(sent[0].text, /482019/);
-    }));
-
-test("sendPasswordResetEmail sends via Mailgun with the reset subject when EMAIL_PROVIDER=mailgun", () =>
-    withEnv({ EMAIL_PROVIDER: "mailgun", MAILGUN_API_KEY: "test-mailgun-key", MAILGUN_DOMAIN: "sandbox123.mailgun.org" }, async () => {
-        const forms: FormData[] = [];
-        const fakeFetch: MailgunFetch = (async (_url: string, init?: RequestInit) => {
-            forms.push(init!.body as FormData);
-            return new Response(null, { status: 200 });
-        }) as MailgunFetch;
-
-        await sendPasswordResetEmail("juana@example.com", "482019", 10, { fetchImpl: fakeFetch, from: "x" });
-
-        assert.equal(forms.length, 1);
-        assert.equal(forms[0].get("subject"), PASSWORD_RESET_EMAIL_SUBJECT);
-        assert.match(String(forms[0].get("text")), /482019/);
     }));
 
 test("a failed password reset email becomes a 502 AppError and never logs the code", () =>
