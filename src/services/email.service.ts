@@ -4,18 +4,14 @@
 // Render's free tier blocks outbound SMTP ports 25/465/587, which is why a
 // prior Gmail/nodemailer version hung indefinitely instead of failing.
 //
-// Two providers are supported behind EMAIL_PROVIDER, both HTTPS APIs so
-// neither has that hang:
-//   - "resend" (default): the production provider. Needs RESEND_API_KEY.
-//     Its sandbox mode (no verified domain) only ever delivers to the
-//     account owner's own email.
-//   - "mailgun": Mailgun's free sandbox domain, used for capstone testing
-//     against multiple real Gmail recipients without buying a domain.
-//     Needs MAILGUN_API_KEY and MAILGUN_DOMAIN. Each test recipient must be
-//     added as an Authorized Recipient in the Mailgun dashboard and click
-//     the confirmation email Mailgun sends them, once, before they can
-//     receive anything else (a sandbox-only restriction, max 5 recipients).
-// Both share EMAIL_FROM. Neither key nor code is ever logged.
+// Resend is the only provider. Needs:
+//   - RESEND_API_KEY
+//   - EMAIL_FROM: an address on the domain verified in Resend, e.g.
+//     "CORDOVA RISKQ <no-reply@your-verified-domain>". Required -- Resend's
+//     unverified sandbox sender (onboarding@resend.dev) only ever delivers
+//     to the account owner's own email, never to registering users.
+//   - EMAIL_PROVIDER: optional; if set it must be "resend".
+// Neither key nor code is ever logged.
 import { Resend } from "resend";
 import { AppError } from "@/utils/AppError";
 
@@ -47,15 +43,8 @@ export function buildPasswordResetEmailText(code: string, expiryMinutes: number)
     ].join("\n");
 }
 
-// What every provider sends: one plain-text email. The text carries the
-// code, so it is never logged.
+// One plain-text email. The text carries the code, so it is never logged.
 type EmailMessage = { to: string; subject: string; text: string };
-
-function readFromAddress(fallback: string): string {
-    return process.env.EMAIL_FROM?.trim() || fallback;
-}
-
-// --- Resend (default provider) ---------------------------------------
 
 // The one method this service needs from a Resend client, so tests can pass
 // a fake without any network.
@@ -70,23 +59,47 @@ export type ResendClient = {
     };
 };
 
-// Created on first send, not at module load: a missing RESEND_API_KEY then
-// fails only the OTP request instead of crashing the whole server on boot.
-let resendClient: ResendClient | null = null;
+export type SendOtpEmailDeps = { client: ResendClient; from: string };
 
-function getResendClient(): ResendClient {
-    if (!resendClient) {
-        resendClient = new Resend(process.env.RESEND_API_KEY) as unknown as ResendClient;
+// Read on every send, not at module load: a misconfiguration then fails only
+// the email request instead of crashing the whole server on boot.
+function readEmailConfig(): { apiKey: string; from: string } {
+    const provider = process.env.EMAIL_PROVIDER?.trim().toLowerCase();
+    if (provider && provider !== "resend") {
+        throw new AppError(`Email is not configured (EMAIL_PROVIDER must be "resend")`, 500);
     }
-    return resendClient;
+
+    const apiKey = process.env.RESEND_API_KEY?.trim();
+    const from = process.env.EMAIL_FROM?.trim();
+    const missing = [!apiKey && "RESEND_API_KEY", !from && "EMAIL_FROM"].filter(Boolean);
+    if (missing.length > 0) {
+        // Names only -- never values.
+        throw new AppError(`Email is not configured (${missing.join(", ")} not set)`, 500);
+    }
+    return { apiKey: apiKey!, from: from! };
 }
 
-async function sendViaResend(
-    message: EmailMessage,
-    deps: { client: ResendClient; from: string } | null,
-): Promise<void> {
-    const resend = deps?.client ?? getResendClient();
-    const from = deps?.from ?? readFromAddress("CORDOVA RISKQ <onboarding@resend.dev>");
+let resendClient: { apiKey: string; client: ResendClient } | null = null;
+
+function getResendClient(apiKey: string): ResendClient {
+    if (resendClient?.apiKey !== apiKey) {
+        resendClient = { apiKey, client: new Resend(apiKey) as unknown as ResendClient };
+    }
+    return resendClient.client;
+}
+
+// Shared by the registration and password-reset emails so they can never
+// diverge in sender or error handling.
+async function sendEmail(message: EmailMessage, deps: SendOtpEmailDeps | null): Promise<void> {
+    let resend: ResendClient;
+    let from: string;
+    if (deps) {
+        ({ client: resend, from } = deps);
+    } else {
+        const config = readEmailConfig();
+        resend = getResendClient(config.apiKey);
+        from = config.from;
+    }
 
     const { error } = await resend.emails.send({ from, ...message });
 
@@ -99,103 +112,11 @@ async function sendViaResend(
     }
 }
 
-// --- Mailgun (sandbox-domain testing provider) ------------------------
-
-// Mailgun sends over plain HTTPS -- unaffected by Render's SMTP port block
-// the way raw SMTP was. Built on Node's global fetch/FormData (available on
-// this project's required Node >=20) instead of adding a Mailgun SDK.
-const MAILGUN_REQUEST_TIMEOUT_MS = 10_000;
-
-export type MailgunFetch = typeof fetch;
-
-function mailgunConfig(): { apiKey: string; domain: string } {
-    const apiKey = process.env.MAILGUN_API_KEY?.trim();
-    const domain = process.env.MAILGUN_DOMAIN?.trim();
-    const missing = [!apiKey && "MAILGUN_API_KEY", !domain && "MAILGUN_DOMAIN"].filter(Boolean);
-    if (missing.length > 0) {
-        // Names only -- never values.
-        throw new AppError(`Email is not configured (${missing.join(", ")} not set)`, 500);
-    }
-    return { apiKey: apiKey!, domain: domain! };
-}
-
-async function sendViaMailgun(
-    message: EmailMessage,
-    deps: { fetchImpl: MailgunFetch; from: string } | null,
-): Promise<void> {
-    const { apiKey, domain } = mailgunConfig();
-    const fetchImpl = deps?.fetchImpl ?? fetch;
-    const from = deps?.from ?? readFromAddress(`CORDOVA RISKQ <otp@${domain}>`);
-
-    const form = new FormData();
-    form.set("from", from);
-    form.set("to", message.to);
-    form.set("subject", message.subject);
-    form.set("text", message.text);
-
-    // Basic auth per Mailgun's API: username "api", password the API key.
-    // Built here (never logged) rather than via a library helper.
-    const auth = Buffer.from(`api:${apiKey}`).toString("base64");
-
-    // So a Mailgun outage or network stall can't hang registration the way
-    // the old raw-SMTP hang did -- this aborts the request instead of
-    // waiting indefinitely.
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), MAILGUN_REQUEST_TIMEOUT_MS);
-
-    let response: Response;
-    try {
-        response = await fetchImpl(`https://api.mailgun.net/v3/${domain}/messages`, {
-            method: "POST",
-            headers: { Authorization: `Basic ${auth}` },
-            body: form,
-            signal: controller.signal,
-        });
-    } catch (err) {
-        const reason =
-            err instanceof Error && err.name === "AbortError"
-                ? `timed out after ${MAILGUN_REQUEST_TIMEOUT_MS}ms`
-                : "network error";
-        console.error("Verification email send failed (mailgun)", { reason });
-        throw new AppError("Couldn't send the verification email. Please try again.", 502);
-    } finally {
-        clearTimeout(timeout);
-    }
-
-    if (!response.ok) {
-        // The response body is Mailgun's own error description (e.g. "recipient
-        // not authorized") -- never the API key, which only ever appears in
-        // the request we sent, never in what Mailgun sends back.
-        const body = await response.text().catch(() => "");
-        console.error("Verification email send failed (mailgun)", { status: response.status, body });
-        throw new AppError("Couldn't send the verification email. Please try again.", 502);
-    }
-}
-
-// --- Provider switch ----------------------------------------------------
-
-export type SendOtpEmailDeps = { client: ResendClient; from: string } | { fetchImpl: MailgunFetch; from: string };
-
-function readEmailProvider(): "resend" | "mailgun" {
-    return process.env.EMAIL_PROVIDER?.trim().toLowerCase() === "mailgun" ? "mailgun" : "resend";
-}
-
-// Routes a message to whichever provider EMAIL_PROVIDER selects. Shared by
-// the registration and password-reset emails so they can never diverge in
-// provider, sender, timeout or error handling.
-function sendEmail(message: EmailMessage, deps: SendOtpEmailDeps | null): Promise<void> {
-    if (readEmailProvider() === "mailgun") {
-        return sendViaMailgun(message, deps && "fetchImpl" in deps ? deps : null);
-    }
-    return sendViaResend(message, deps && "client" in deps ? deps : null);
-}
-
 export async function sendOtpEmail(
     to: string,
     code: string,
     expiryMinutes: number,
-    // Injectable for tests; defaults to the real client for whichever
-    // provider EMAIL_PROVIDER selects.
+    // Injectable for tests; defaults to the real Resend client.
     deps: SendOtpEmailDeps | null = null,
 ): Promise<void> {
     return sendEmail({ to, subject: OTP_EMAIL_SUBJECT, text: buildOtpEmailText(code, expiryMinutes) }, deps);
