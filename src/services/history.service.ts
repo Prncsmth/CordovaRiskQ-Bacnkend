@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
+import { responderHistoryFilter } from "@/services/historyFilters";
 
 const TERMINAL_STATUSES = ["completed", "cancelled"];
 
@@ -69,6 +70,10 @@ function shapeListItem(incident: HistoryIncident) {
             status: r.status,
         })),
         responseTimeSeconds: computeResponseTimeSeconds(incident),
+        // Always null for now: there is no resolution timestamp yet, and
+        // updatedAt is deliberately not used as a stand-in. Populated once
+        // IncidentResponder.resolvedAt exists.
+        resolutionTimeSeconds: null as number | null,
     };
 }
 
@@ -120,9 +125,7 @@ export const historyService = {
             ...(filters.barangay
                 ? { locationLabel: { contains: filters.barangay, mode: "insensitive" as const } }
                 : {}),
-            ...(filters.responderId
-                ? { responders: { some: { responderId: filters.responderId } } }
-                : {}),
+            ...responderHistoryFilter(filters.responderId),
             // Filters on when the incident was resolved/cancelled (updatedAt),
             // not when it was originally reported (createdAt) -- this is a
             // report of terminal incidents, and updatedAt is already treated
