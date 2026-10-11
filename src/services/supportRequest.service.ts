@@ -66,6 +66,9 @@ export const supportRequestService = {
     async listForAdmin(filters: {
         search?: string;
         status?: string;
+        topic?: string;
+        startDate?: Date;
+        endDate?: Date;
         page?: number;
         limit?: number;
     }) {
@@ -75,6 +78,14 @@ export const supportRequestService = {
 
         const where = {
             ...(filters.status ? { status: filters.status } : {}),
+            ...(filters.topic ? { topic: filters.topic } : {}),
+            // Filters on createdAt (date submitted), not updatedAt -- unlike
+            // history.service.ts's incident date filter, a support request's
+            // submission date is what "filter by date" means here, since
+            // there's no separate completion milestone to prefer instead.
+            ...(filters.startDate || filters.endDate
+                ? { createdAt: { gte: filters.startDate, lte: filters.endDate } }
+                : {}),
             ...(filters.search
                 ? {
                       OR: [

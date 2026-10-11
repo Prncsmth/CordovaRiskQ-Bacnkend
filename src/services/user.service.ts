@@ -23,6 +23,12 @@ export const userService = {
             // or an email/password account later linked to Google. The app
             // shows its password row as "Password (Google Account)".
             isGoogleAccount: user.googleId !== null,
+            // A responder's admin-set organization and home barangay, so the
+            // app can open their Dashboard on their own barangay and show
+            // where they're assigned. Re-read on each Dashboard visit, so an
+            // admin's change shows up without logging in again.
+            unit: user.unit,
+            assignedBarangay: user.assignedBarangay,
         };
     },
 
