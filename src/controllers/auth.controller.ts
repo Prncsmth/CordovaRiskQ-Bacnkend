@@ -44,6 +44,12 @@ export const authController = {
         res.status(200).json({ success: true, ...result });
     }),
 
+    adminLogin: asyncHandler(async (req: Request, res: Response) => {
+        const { email, password } = req.body;
+        const result = await authService.adminLogin(email, password);
+        res.status(200).json({ success: true, ...result });
+    }),
+
     google: asyncHandler(async (req: Request, res: Response) => {
         const { idToken } = req.body;
         const result = await authService.loginWithGoogle(idToken);
