@@ -2,7 +2,7 @@ import { Response } from "express";
 import { AuthenticatedRequest } from "@/middlewares/authenticate.middleware";
 import { supportRequestService } from "@/services/supportRequest.service";
 import { asyncHandler } from "@/utils/asyncHandler";
-import { queryInt, queryString } from "@/utils/queryParams";
+import { queryDate, queryInt, queryString } from "@/utils/queryParams";
 
 export const supportRequestController = {
     create: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
@@ -19,6 +19,9 @@ export const supportRequestController = {
         const result = await supportRequestService.listForAdmin({
             search: queryString(req.query.search),
             status: queryString(req.query.status),
+            topic: queryString(req.query.topic),
+            startDate: queryDate(req.query.startDate),
+            endDate: queryDate(req.query.endDate),
             page: queryInt(req.query.page),
             limit: queryInt(req.query.limit),
         });
