@@ -1,6 +1,7 @@
 import http from "http";
 
 import app from "./app";
+import { startAdminAuditLogPruning } from "@/lib/adminAuditLogPruning";
 import { startIncidentEscalationPolling } from "@/lib/incidentEscalationPolling";
 import { startSosExpiryPolling } from "@/lib/sosExpiryPolling";
 import { startTidePolling, startWeatherPolling } from "@/lib/tidePolling";
@@ -27,4 +28,5 @@ httpServer.listen(PORT, () => {
     startWeatherPolling();
     startSosExpiryPolling();
     startIncidentEscalationPolling();
+    startAdminAuditLogPruning();
 });

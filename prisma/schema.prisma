@@ -47,6 +47,7 @@ model User {
   reportedIncidents  Incident[] @relation("ReportedIncidents")
   respondedIncidents IncidentResponder[]
   announcements      Announcement[]
+  adminAuditLogs     AdminAuditLog[]
   notifications      Notification[]
   supportRequests    SupportRequest[]
 }
@@ -141,6 +142,22 @@ model Announcement {
   createdBy       User     @relation(fields: [createdByUserId], references: [id])
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+}
+
+// One row per admin-initiated action -- announcements, responder barangay
+// assignment, role changes (approve/reject/suspend), support request status
+// updates. Distinct from the system-event feed getRecentActivity derives
+// from existing tables (SosAlert, Incident, etc.): those capture what
+// happened in the system, this captures who (which admin) did it. Merged
+// into the same Recent Activity / Audit Logs feed on the read side.
+model AdminAuditLog {
+  id        String   @id @default(uuid())
+  adminId   String
+  admin     User     @relation(fields: [adminId], references: [id])
+  action    String   // e.g. "announcement_created", "responder_barangay_updated", "user_role_updated"
+  detail    String   // human-readable summary, e.g. "Published 'Flood Advisory' (Critical)"
+  targetId  String?
+  createdAt DateTime @default(now())
 }
 
 model Notification {

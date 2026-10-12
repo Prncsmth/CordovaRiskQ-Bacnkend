@@ -6,6 +6,7 @@ import {
     findViewableAnnouncement,
 } from "@/services/announcementAudience";
 import { storedPriorityValues, withNormalizedPriority } from "@/services/announcementPriority";
+import { logAdminAction } from "@/services/adminAuditLog.service";
 
 export const announcementService = {
     // viewerRole is null for an anonymous caller. Responders Only
@@ -128,6 +129,13 @@ export const announcementService = {
             );
         }
 
+        await logAdminAction(
+            createdByUserId,
+            "announcement_created",
+            `Published "${announcement.title}" (${announcement.priority})`,
+            announcement.id,
+        );
+
         return withNormalizedPriority(announcement);
     },
 
@@ -145,28 +153,32 @@ export const announcementService = {
             priority: string;
             audience: string;
             barangayName?: string;
-        }
+        },
+        adminId: string,
     ) {
         const existing = await prisma.announcement.findUnique({ where: { id } });
         if (!existing) throw new AppError("Announcement not found", 404);
 
-        return withNormalizedPriority(
-            await prisma.announcement.update({
-                where: { id },
-                data: {
-                    title: data.title,
-                    content: data.content,
-                    priority: data.priority,
-                    audience: data.audience,
-                    barangayName: data.barangayName ?? null,
-                },
-            })
-        );
+        const updated = await prisma.announcement.update({
+            where: { id },
+            data: {
+                title: data.title,
+                content: data.content,
+                priority: data.priority,
+                audience: data.audience,
+                barangayName: data.barangayName ?? null,
+            },
+        });
+
+        await logAdminAction(adminId, "announcement_updated", `Edited "${updated.title}"`, updated.id);
+
+        return withNormalizedPriority(updated);
     },
 
-    async remove(id: string) {
+    async remove(id: string, adminId: string) {
         const existing = await prisma.announcement.findUnique({ where: { id } });
         if (!existing) throw new AppError("Announcement not found", 404);
         await prisma.announcement.delete({ where: { id } });
+        await logAdminAction(adminId, "announcement_deleted", `Deleted "${existing.title}"`, id);
     },
 };

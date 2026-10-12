@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { emitAdminActivity, emitAdminSupportRequest } from "@/realtime/emit";
 import { supportRequestDetail } from "@/services/adminActivity";
+import { logAdminAction } from "@/services/adminAuditLog.service";
 import { notificationService } from "@/services/notification.service";
 import { AppError } from "@/utils/AppError";
 
@@ -113,7 +114,7 @@ export const supportRequestService = {
         return { supportRequests, total, openCount, page, limit };
     },
 
-    async updateStatus(id: string, status: string) {
+    async updateStatus(id: string, status: string, adminId: string) {
         const existing = await prisma.supportRequest.findUnique({ where: { id } });
         if (!existing) throw new AppError("Support request not found", 404);
         const updated = await prisma.supportRequest.update({
@@ -121,6 +122,13 @@ export const supportRequestService = {
             data: { status },
             include: { user: { select: REQUESTER_SELECT } },
         });
+
+        await logAdminAction(
+            adminId,
+            "support_request_status_updated",
+            `Set ${updated.user.name ?? "a user"}'s ${updated.topic} request to "${status}"`,
+            updated.id,
+        );
 
         emitAdminSupportRequest({
             kind: "updated",

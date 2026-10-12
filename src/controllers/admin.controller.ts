@@ -36,12 +36,21 @@ export const adminController = {
     }),
 
     updateUserRole: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const user = await adminService.updateUserRole(req.params.id as string, req.body.role, req.body.unit);
+        const user = await adminService.updateUserRole(
+            req.params.id as string,
+            req.body.role,
+            req.body.unit,
+            req.userId!,
+        );
         res.status(200).json({ success: true, user });
     }),
 
     updateResponderBarangay: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const user = await adminService.updateResponderBarangay(req.params.id as string, req.body.barangay);
+        const user = await adminService.updateResponderBarangay(
+            req.params.id as string,
+            req.body.barangay,
+            req.userId!,
+        );
         res.status(200).json({ success: true, user });
     }),
 

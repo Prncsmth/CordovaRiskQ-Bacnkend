@@ -31,7 +31,8 @@ export const supportRequestController = {
     updateStatus: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
         const supportRequest = await supportRequestService.updateStatus(
             req.params.id as string,
-            req.body.status
+            req.body.status,
+            req.userId!
         );
         res.status(200).json({ success: true, supportRequest });
     }),

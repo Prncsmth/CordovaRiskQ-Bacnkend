@@ -11,7 +11,15 @@ export type AdminActivityType =
     | "incident_resolved"
     | "evacuation_center_updated"
     | "user_registered"
-    | "support_request";
+    | "support_request"
+    // Admin-initiated actions (AdminAuditLog), merged into this same feed --
+    // see adminAuditLog.service.ts's AdminAuditAction, which this mirrors.
+    | "announcement_created"
+    | "announcement_updated"
+    | "announcement_deleted"
+    | "responder_barangay_updated"
+    | "user_role_updated"
+    | "support_request_status_updated";
 
 export interface AdminActivityItem {
     type: AdminActivityType;
