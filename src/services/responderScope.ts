@@ -4,16 +4,17 @@
 // detail, the accept/decline endpoint and the new-incident alerts. It's
 // tiered, so MDRRMO only hears about what actually needs them:
 //
-//   1. The BDRRMO responders assigned to the incident's barangay.
+//   1. The BDRRMO responders assigned to the incident's barangay -- and
+//      only them: a BDRRMO never gets another barangay's incident.
 //   2. MDRRMO, as backup -- right away when that barangay has no on-duty
 //      BDRRMO (or the incident can't be placed in a barangay), otherwise
-//      only once it escalates.
-//   3. Escalation: still pending (nobody joined) ESCALATE_AFTER_MS after it
-//      was created -- the admin's Unattended threshold -- it opens to every
-//      responder.
+//      once it escalates: still pending (nobody joined) ESCALATE_AFTER_MS
+//      after it was created -- the admin's Unattended threshold.
 //
-// A BDRRMO without an assigned barangay, or a responder with no unit, only
-// gets escalated incidents. The responder's unit and barangay always come
+// MDRRMO covers all of Cordova, so there's always someone above the
+// barangay; opening an unanswered incident to other barangays' BDRRMO
+// isn't needed. A BDRRMO without an assigned barangay, or a responder with
+// no unit, gets nothing until the admin assigns them. The responder's unit and barangay always come
 // from their User row, never the client. An incident's barangay is the
 // nearest barangay center -- the same rule the responder app uses.
 import { BARANGAY_CENTERS } from "@/constants/barangayCenters";
@@ -88,12 +89,12 @@ export function canRespondToIncident(
 ): boolean {
     if (responder.role !== "responder") return false;
     if (isAssignedBarangay(responder, incident)) return true;
-    if (responder.unit === "MDRRMO" && !hasBarangayCover(incident, coverage)) return true;
-    return isEscalated(incident, now);
+    if (responder.unit !== "MDRRMO") return false;
+    return !hasBarangayCover(incident, coverage) || isEscalated(incident, now);
 }
 
-// For the app's note: they can act on it, but it isn't their own barangay
-// -- it reached them as backup or because it escalated.
+// For the app's note: an MDRRMO can act on it as backup -- the barangay
+// has no on-duty BDRRMO, or nobody there took it in time.
 export function isOpenAsBackup(
     responder: ScopeResponder,
     incident: ScopeIncident,
@@ -123,10 +124,10 @@ export function selectNewIncidentRecipients(responders: ScopeResponder[], incide
     return onDuty.filter((r) => r.unit === "MDRRMO").map((r) => r.id);
 }
 
-// The escalation alert: every on-duty responder who hasn't already been
+// The escalation alert: every on-duty MDRRMO who hasn't already been
 // alerted about it or put on its roster (e.g. declined).
 export function selectEscalationRecipients(responders: ScopeResponder[], excludeIds: Set<string>): string[] {
     return responders
-        .filter((r) => r.role === "responder" && r.isOnDuty && !excludeIds.has(r.id))
+        .filter((r) => r.role === "responder" && r.isOnDuty && r.unit === "MDRRMO" && !excludeIds.has(r.id))
         .map((r) => r.id);
 }

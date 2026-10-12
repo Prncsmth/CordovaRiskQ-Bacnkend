@@ -81,10 +81,12 @@ test("MDRRMO steps in right away when the barangay has no on-duty BDRRMO", () =>
     assert.equal(canRespondToIncident(mdrrmo(), fresh(NOWHERE), dayAsCovered, NOW), true);
 });
 
-test("after 2 minutes still pending, everyone may respond, MDRRMO included", () => {
+test("after 2 minutes still pending, it opens to MDRRMO -- never to another barangay's BDRRMO", () => {
     assert.equal(canRespondToIncident(mdrrmo(), stale(DAY_AS), dayAsCovered, NOW), true);
-    assert.equal(canRespondToIncident(bdrrmo("Poblacion"), stale(DAY_AS), dayAsCovered, NOW), true);
-    assert.equal(canRespondToIncident(unclassified, stale(DAY_AS), dayAsCovered, NOW), true);
+    assert.equal(canRespondToIncident(bdrrmo("Poblacion"), stale(DAY_AS), dayAsCovered, NOW), false);
+    assert.equal(canRespondToIncident(unclassified, stale(DAY_AS), dayAsCovered, NOW), false);
+    // The barangay's own BDRRMO keeps it.
+    assert.equal(canRespondToIncident(bdrrmo("Day-as"), stale(DAY_AS), dayAsCovered, NOW), true);
 });
 
 test("one second short of 2 minutes is not escalated yet", () => {
@@ -99,14 +101,17 @@ test("an incident someone already took never escalates, however old", () => {
     assert.equal(canRespondToIncident(bdrrmo("Poblacion"), taken, dayAsCovered, NOW), false);
 });
 
-test("unassigned or unit-less responders only get escalated incidents", () => {
+test("unassigned or unit-less responders get nothing until the admin assigns them", () => {
     assert.equal(canRespondToIncident(bdrrmo(null), fresh(POBLACION), dayAsCovered, NOW), false);
     assert.equal(canRespondToIncident(unclassified, fresh(POBLACION), dayAsCovered, NOW), false);
+    assert.equal(canRespondToIncident(bdrrmo(null), stale(POBLACION), dayAsCovered, NOW), false);
+    assert.equal(canRespondToIncident(unclassified, stale(POBLACION), dayAsCovered, NOW), false);
 });
 
-test("isOpenAsBackup: true for MDRRMO or an outsider it reached, false for its own barangay", () => {
+test("isOpenAsBackup: true for MDRRMO it reached as backup, false for a BDRRMO's own barangay", () => {
     assert.equal(isOpenAsBackup(mdrrmo(), fresh(POBLACION), dayAsCovered, NOW), true);
-    assert.equal(isOpenAsBackup(bdrrmo("Poblacion"), stale(DAY_AS), dayAsCovered, NOW), true);
+    assert.equal(isOpenAsBackup(mdrrmo(), stale(DAY_AS), dayAsCovered, NOW), true);
+    assert.equal(isOpenAsBackup(bdrrmo("Poblacion"), stale(DAY_AS), dayAsCovered, NOW), false);
     assert.equal(isOpenAsBackup(bdrrmo("Day-as"), fresh(DAY_AS), dayAsCovered, NOW), false);
     assert.equal(isOpenAsBackup(mdrrmo(), fresh(DAY_AS), dayAsCovered, NOW), false);
 });
@@ -136,9 +141,10 @@ test("first alert: MDRRMO when the barangay has no on-duty BDRRMO", () => {
     assert.deepEqual(selectNewIncidentRecipients(responders, NOWHERE), ["m"]);
 });
 
-test("escalation alert: every on-duty responder not already alerted or on the roster", () => {
-    const responders = [bdrrmo("Day-as"), bdrrmo("Poblacion"), mdrrmo(), bdrrmo("Gabi", false), unclassified];
-    // Day-as BDRRMO got the first alert; the unclassified one declined.
-    const ids = selectEscalationRecipients(responders, new Set(["b-Day-as", "u"])).sort();
-    assert.deepEqual(ids, ["b-Poblacion", "m"].sort());
+test("escalation alert: only on-duty MDRRMO not already alerted or on the roster", () => {
+    const responders = [bdrrmo("Day-as"), bdrrmo("Poblacion"), mdrrmo(), mdrrmo(false), bdrrmo("Gabi", false), unclassified];
+    // Day-as BDRRMO got the first alert; other barangays' BDRRMO never hear of it.
+    assert.deepEqual(selectEscalationRecipients(responders, new Set(["b-Day-as"])), ["m"]);
+    // An MDRRMO already alerted (or on the roster) isn't alerted again.
+    assert.deepEqual(selectEscalationRecipients(responders, new Set(["m"])), []);
 });

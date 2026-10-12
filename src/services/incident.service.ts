@@ -665,9 +665,9 @@ export const incidentService = {
         return result;
     },
 
-    // Pages every on-duty responder not yet alerted about an incident -- MDRRMO
-    // included -- once it has gone ESCALATE_AFTER_MS with nobody joining (see
-    // responderScope.ts): from then on any responder may take it. Once per
+    // Pages every on-duty MDRRMO not yet alerted about an incident once it has
+    // gone ESCALATE_AFTER_MS with nobody joining (see responderScope.ts): the
+    // municipal backup takes over. Other barangays' BDRRMO are never paged. Once per
     // incident: an escalation alert already sent is found by its title, and
     // anyone who already got an alert for it or is on its roster is skipped,
     // so this needs no extra column. Run on an interval by
