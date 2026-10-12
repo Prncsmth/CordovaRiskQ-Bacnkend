@@ -3,7 +3,7 @@ import http from "http";
 import app from "./app";
 import { startIncidentEscalationPolling } from "@/lib/incidentEscalationPolling";
 import { startSosExpiryPolling } from "@/lib/sosExpiryPolling";
-import { startTidePolling } from "@/lib/tidePolling";
+import { startTidePolling, startWeatherPolling } from "@/lib/tidePolling";
 import { initRealtime } from "@/realtime/socket";
 import { onAdminActivity } from "@/realtime/emit";
 import { notificationService } from "@/services/notification.service";
@@ -24,6 +24,7 @@ onAdminActivity((activity) => {
 httpServer.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     startTidePolling();
+    startWeatherPolling();
     startSosExpiryPolling();
     startIncidentEscalationPolling();
 });
