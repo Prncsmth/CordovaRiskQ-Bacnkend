@@ -16,6 +16,70 @@ import { emitAdminActivity, emitAdminIncidentUpdate, emitIncidentUpdate } from "
 import { resolveUrgency } from "@/services/incidentUrgency";
 import { ROSTER_NOTIFICATION_COPY } from "@/services/rosterNotificationCopy";
 import { incidentStatusToAlertOutcome } from "@/services/sosAlertStatus";
+import {
+    canRespondToIncident,
+    coverageFrom,
+    isResponseActionAllowed,
+    selectNewIncidentRecipients,
+    type ResponderCoverage,
+    type ScopeResponder,
+} from "@/services/responderScope";
+
+const SCOPE_RESPONDER_SELECT = {
+    id: true,
+    role: true,
+    unit: true,
+    assignedBarangay: true,
+    isOnDuty: true,
+} as const;
+
+// Every on-duty responder, from their User rows -- both the coverage
+// snapshot (is anyone in scope on duty?) and the push recipient pool.
+async function loadOnDutyResponders(): Promise<ScopeResponder[]> {
+    return prisma.user.findMany({
+        where: { role: "responder", isOnDuty: true },
+        select: SCOPE_RESPONDER_SELECT,
+    });
+}
+
+// The requester's own unit/barangay from their User row (never the client)
+// plus the current coverage, for per-incident canRespond checks.
+async function loadScopeContext(
+    requesterId: string,
+): Promise<{ requester: ScopeResponder | null; coverage: ResponderCoverage }> {
+    const [requester, onDuty] = await Promise.all([
+        prisma.user.findUnique({ where: { id: requesterId }, select: SCOPE_RESPONDER_SELECT }),
+        loadOnDutyResponders(),
+    ]);
+    return { requester, coverage: coverageFrom(onDuty) };
+}
+
+function canRequesterRespond(
+    context: { requester: ScopeResponder | null; coverage: ResponderCoverage },
+    incident: { latitude: number | null; longitude: number | null },
+): boolean {
+    return context.requester ? canRespondToIncident(context.requester, incident, context.coverage) : false;
+}
+
+// The new_incident push / in-app alert goes only to on-duty responders who
+// can respond to this incident (see responderScope.ts) -- not every
+// responder in Cordova.
+async function notifyRespondersOfNewIncident(
+    incident: { id: string; latitude: number | null; longitude: number | null },
+    copy: { title: string; body: string },
+) {
+    try {
+        const onDuty = await loadOnDutyResponders();
+        const recipients = selectNewIncidentRecipients(onDuty, incident, coverageFrom(onDuty));
+        await notificationService.createForUsers(recipients, {
+            type: "new_incident",
+            ...copy,
+            referenceId: incident.id,
+        });
+    } catch (error) {
+        console.error("Failed to notify responders of new incident:", error);
+    }
+}
 
 export const NON_TERMINAL_STATUSES =["pending", "lobby", "on_the_way", "arrived"];
 
@@ -251,11 +315,9 @@ export const incidentService = {
                 urgency: resolveUrgency(data.category, data.markedUrgent),
             },
         });
-        await notificationService.createForAllResponders({
-            type: "new_incident",
+        await notifyRespondersOfNewIncident(incident, {
             title: "New incident reported",
             body: `A ${data.category} incident was reported near ${data.locationLabel}.`,
-            referenceId: incident.id,
         });
         emitAdminIncidentUpdate({
             ...incident,
@@ -317,11 +379,9 @@ export const incidentService = {
     },
 
     notifyRespondersOfSos(incident: Incident) {
-        return notificationService.createForAllResponders({
-            type: "new_incident",
+        return notifyRespondersOfNewIncident(incident, {
             title: "SOS alert",
             body: "An SOS alert was triggered nearby.",
-            referenceId: incident.id,
         });
     },
 
@@ -334,6 +394,7 @@ export const incidentService = {
             orderBy: { createdAt: "desc" },
             include: { responders: { include: { responder: { select: { name: true } } } } },
         });
+        const scope = await loadScopeContext(responderId);
 
         return incidents.map(({ responders, ...incident }) => {
             const shaped = shapeResponders(responders);
@@ -344,6 +405,11 @@ export const incidentService = {
                 respondersCount: shaped.respondersCount,
                 responders: shaped.activeResponders,
                 myStatus: myRow?.status ?? "pending",
+                // Whether this caller may accept/decline it. The full list
+                // stays visible (the Live Map is read-only situational
+                // awareness); the app only alerts on, and offers actions
+                // for, incidents where this is true.
+                canRespond: canRequesterRespond(scope, incident),
             };
         });
     },
@@ -395,7 +461,11 @@ export const incidentService = {
         }
 
         const result = buildResponderFacingIncident(incident, incident.responders, requesterId);
-        return { ...result, reporterContact: await loadReporterContact(incident.reporterId, result.myStatus) };
+        return {
+            ...result,
+            reporterContact: await loadReporterContact(incident.reporterId, result.myStatus),
+            canRespond: canRequesterRespond(await loadScopeContext(requesterId), incident),
+        };
     },
 
     async updateMyResponderStatus(
@@ -421,6 +491,16 @@ export const incidentService = {
                 `Cannot move from ${currentStatus ?? "no status"} to ${targetStatus}`,
                 409,
             );
+        }
+
+        // Accepting or declining needs this responder to be in scope for the
+        // incident (their own User row, server-side); someone already on the
+        // roster may keep going or leave. See responderScope.ts.
+        if (!(currentStatus && isActiveStatus(currentStatus))) {
+            const scope = await loadScopeContext(responderId);
+            if (!isResponseActionAllowed(currentStatus, canRequesterRespond(scope, incident))) {
+                throw new AppError("This incident is outside your assigned barangay", 403);
+            }
         }
 
         await prisma.incidentResponder.upsert({
