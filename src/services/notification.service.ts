@@ -1,6 +1,8 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
 import { emitNotificationCreated } from "@/realtime/emit";
+import type { AdminActivityType } from "@/services/adminActivity";
+import { canAccessNotification, notificationWindowStart } from "@/services/notificationWindow";
 
 const EXPO_PUSH_URL = "https://exp.host/--/api/v2/push/send";
 // Expo's push API rejects an entire request if it carries more than 100
@@ -20,7 +22,9 @@ type NotificationData = {
         | "new_incident"
         | "roster_update"
         | "team_ring"
-        | "support_status";
+        | "support_status"
+        // An admin activity saved to each admin's inbox (notificationWindow.ts).
+        | AdminActivityType;
     title: string;
     body: string;
     referenceId?: string;
@@ -106,17 +110,24 @@ async function sendPushToRecipients(
 }
 
 export const notificationService = {
-    async listForUser(userId: string) {
+    // Admins and responders get the last 24 hours (by createdAt) only, so
+    // expired ones never come back and never count as unread; citizens keep
+    // their unexpiring list. See notificationWindow.ts.
+    async listForUser(userId: string, role?: string) {
+        const since = notificationWindowStart(role);
         return prisma.notification.findMany({
-            where: { userId },
+            where: { userId, ...(since ? { createdAt: { gte: since } } : {}) },
             orderBy: { createdAt: "desc" },
             take: 50,
         });
     },
 
+    // Only flips this user's own row (read state is per user -- one
+    // responder reading it doesn't touch anyone else's copy). Doesn't touch
+    // createdAt, so its 24-hour expiry is unchanged.
     async markRead(id: string, userId: string) {
         const existing = await prisma.notification.findUnique({ where: { id } });
-        if (!existing || existing.userId !== userId) {
+        if (!canAccessNotification(existing, userId)) {
             throw new AppError("Notification not found", 404);
         }
         await prisma.notification.update({ where: { id }, data: { read: true } });
@@ -131,7 +142,7 @@ export const notificationService = {
 
     async remove(id: string, userId: string) {
         const existing = await prisma.notification.findUnique({ where: { id } });
-        if (!existing || existing.userId !== userId) {
+        if (!canAccessNotification(existing, userId)) {
             throw new AppError("Notification not found", 404);
         }
         await prisma.notification.delete({ where: { id } });
@@ -141,7 +152,9 @@ export const notificationService = {
     // send. Wrapped in one try/catch so a DB/network failure here can
     // never make an already-committed primary action (e.g. publishing an
     // announcement) appear to fail to its caller.
-    async createForUsers(userIds: string[], data: NotificationData) {
+    // options.push: false saves the rows (and their live socket event)
+    // without an Expo push -- for admin activity, which is dashboard-only.
+    async createForUsers(userIds: string[], data: NotificationData, options?: { push?: boolean }) {
         if (userIds.length === 0) return;
 
         try {
@@ -164,6 +177,8 @@ export const notificationService = {
                     createdAt: row.createdAt.toISOString(),
                 });
             }
+
+            if (options?.push === false) return;
 
             const recipients = await prisma.user.findMany({
                 where: { id: { in: userIds }, pushToken: { not: null } },
@@ -224,7 +239,7 @@ export const notificationService = {
     // share the same User table/login as citizens and responders (an admin
     // can also open the mobile app), an "All Users" announcement should
     // reach them too, matching what the audience label actually says.
-    async createForAllAdmins(data: NotificationData) {
+    async createForAllAdmins(data: NotificationData, options?: { push?: boolean }) {
         try {
             const admins = await prisma.user.findMany({
                 where: { role: "admin" },
@@ -233,7 +248,8 @@ export const notificationService = {
 
             await this.createForUsers(
                 admins.map((a) => a.id),
-                data
+                data,
+                options
             );
         } catch (error) {
             console.error("Failed to create notifications for all admins:", error);

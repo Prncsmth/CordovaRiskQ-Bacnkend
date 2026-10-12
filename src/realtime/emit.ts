@@ -72,6 +72,16 @@ export function emitResponderLocationUpdate(
 // the initial load; this covers everything that happens afterward.
 export function emitAdminActivity(activity: AdminActivityItem): void {
     ioInstance?.to("admin").emit("admin:activity", activity);
+    adminActivityListener?.(activity);
+}
+
+// Also hands each activity to a listener set at startup (server.ts), which
+// saves it to every admin's notification inbox. A hook rather than a direct
+// call because notification.service already imports this module.
+let adminActivityListener: ((activity: AdminActivityItem) => void) | null = null;
+
+export function onAdminActivity(listener: ((activity: AdminActivityItem) => void) | null): void {
+    adminActivityListener = listener;
 }
 
 export interface AdminResponderLocationPayload extends ResponderLocationPayload {
