@@ -5,6 +5,7 @@ import {
     activeAnnouncementConditions,
     findViewableAnnouncement,
 } from "@/services/announcementAudience";
+import { storedPriorityValues, withNormalizedPriority } from "@/services/announcementPriority";
 
 export const announcementService = {
     // viewerRole is null for an anonymous caller. Responders Only
@@ -18,23 +19,30 @@ export const announcementService = {
             })
         );
         if (!announcement) throw new AppError("Announcement not found", 404);
-        return announcement;
+        return withNormalizedPriority(announcement);
     },
 
+    // Newest first, regardless of severity: announcements have no expiry
+    // yet, so ranking by severity would pin an old Critical alert above
+    // every newer announcement indefinitely.
     async getActive(barangayName?: string) {
-        return prisma.announcement.findFirst({
-            where: { OR: activeAnnouncementConditions({ barangayName }) },
-            orderBy: { createdAt: "desc" },
-        });
+        return withNormalizedPriority(
+            await prisma.announcement.findFirst({
+                where: { OR: activeAnnouncementConditions({ barangayName }) },
+                orderBy: { createdAt: "desc" },
+            })
+        );
     },
 
     // The responder dashboard's card: newest of "All Users" and "Responders
     // Only". Served only behind authenticate + requireResponder.
     async getActiveForResponder() {
-        return prisma.announcement.findFirst({
-            where: { OR: activeAnnouncementConditions({ includeRespondersOnly: true }) },
-            orderBy: { createdAt: "desc" },
-        });
+        return withNormalizedPriority(
+            await prisma.announcement.findFirst({
+                where: { OR: activeAnnouncementConditions({ includeRespondersOnly: true }) },
+                orderBy: { createdAt: "desc" },
+            })
+        );
     },
 
     async listForAdmin(filters: {
@@ -48,7 +56,8 @@ export const announcementService = {
             filters.limit && filters.limit > 0 ? Math.min(Math.floor(filters.limit), 100) : 20;
 
         const where = {
-            ...(filters.priority ? { priority: filters.priority } : {}),
+            // A level also matches rows still stored under its old name.
+            ...(filters.priority ? { priority: { in: storedPriorityValues(filters.priority) } } : {}),
             ...(filters.search
                 ? {
                       OR: [
@@ -69,7 +78,7 @@ export const announcementService = {
             }),
         ]);
 
-        return { announcements, total, page, limit };
+        return { announcements: announcements.map(withNormalizedPriority), total, page, limit };
     },
 
     async create(
@@ -119,7 +128,7 @@ export const announcementService = {
             );
         }
 
-        return announcement;
+        return withNormalizedPriority(announcement);
     },
 
     // Updates the announcement's own fields only -- deliberately doesn't
@@ -141,16 +150,18 @@ export const announcementService = {
         const existing = await prisma.announcement.findUnique({ where: { id } });
         if (!existing) throw new AppError("Announcement not found", 404);
 
-        return prisma.announcement.update({
-            where: { id },
-            data: {
-                title: data.title,
-                content: data.content,
-                priority: data.priority,
-                audience: data.audience,
-                barangayName: data.barangayName ?? null,
-            },
-        });
+        return withNormalizedPriority(
+            await prisma.announcement.update({
+                where: { id },
+                data: {
+                    title: data.title,
+                    content: data.content,
+                    priority: data.priority,
+                    audience: data.audience,
+                    barangayName: data.barangayName ?? null,
+                },
+            })
+        );
     },
 
     async remove(id: string) {

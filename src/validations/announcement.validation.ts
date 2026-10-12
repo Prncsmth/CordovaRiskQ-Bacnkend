@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+    ACCEPTED_PRIORITY_INPUTS,
+    normalizeAnnouncementPriority,
+} from "@/services/announcementPriority";
 
 const announcementFields = z
     .object({
@@ -10,7 +14,9 @@ const announcementFields = z
             .string()
             .min(1, "Content is required")
             .max(5000, "Content must be 5000 characters or fewer"),
-        priority: z.enum(["Normal", "Urgent"]),
+        // Information | Warning | Critical; an older admin's Normal/Urgent
+        // is still accepted and saved as its new name (announcementPriority.ts).
+        priority: z.enum(ACCEPTED_PRIORITY_INPUTS).transform(normalizeAnnouncementPriority),
         audience: z.enum(["All Users", "Responders Only", "Specific Barangay"]),
         barangayName: z.string().min(1).optional(),
     })
