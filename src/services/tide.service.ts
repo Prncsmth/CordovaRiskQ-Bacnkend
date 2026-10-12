@@ -5,17 +5,19 @@ import { AppError } from "@/utils/AppError";
 import { notificationService } from "@/services/notification.service";
 
 const STORMGLASS_BASE_URL = "https://api.stormglass.io/v2";
+const OPEN_METEO_BASE_URL = "https://api.open-meteo.com/v1/forecast";
 
 // Skip a redundant Stormglass call if we already have a recent reading --
 // guards against `tsx watch` restarting the server (and re-polling) on
 // every file save during development, and against overlapping polls
 // burning quota if a previous run is slow. startTidePolling() polls
-// immediately on every server boot, and the poll interval is 8 hours
+// immediately on every server boot, and the tide poll interval is 8 hours
 // (see tidePolling.ts), so this window is kept just under that: a
 // restart within 7 hours of the last successful poll is free, while a
 // restart after a longer gap, or the regular 8h scheduled tick, still
-// triggers a real Stormglass call.
-const FRESHNESS_WINDOW_MS = 7 * 60 * 60 * 1000; // 7 hours
+// triggers a real Stormglass call. Weather now comes from Open-Meteo
+// (no comparable daily quota), so this guard only ever gates the tide half.
+const TIDE_FRESHNESS_WINDOW_MS = 7 * 60 * 60 * 1000; // 7 hours
 
 type StormglassSeaLevelResponse = {
     data: { time: string; sg: number }[];
@@ -25,29 +27,14 @@ type StormglassExtremesResponse = {
     data: { time: string; type: "high" | "low"; height: number }[];
 };
 
-// NOTE: unlike tide/sea-level/point and tide/extremes/point (which nest
-// readings under a "data" array), weather/point nests readings under an
-// "hours" array -- confirmed against the live response (see Task 2 Step 1).
-type StormglassWeatherResponse = {
-    hours: {
-        time: string;
-        airTemperature: { sg: number };
-        cloudCover: { sg: number };
-        precipitation: { sg: number };
-    }[];
-};
-
 // Response shapes per Stormglass v2 docs (tide/sea-level/point,
-// tide/extremes/point, weather/point). If your account returns a different
-// source key than "sg" for any parameter, adjust the extraction below after
-// checking the raw response (see this task's Step 1).
-async function fetchFromStormglass(): Promise<{
+// tide/extremes/point). If your account returns a different source key
+// than "sg" for any parameter, adjust the extraction below after checking
+// the raw response.
+async function fetchTideFromStormglass(): Promise<{
     seaLevelM: number;
     nextExtremeAt: Date | null;
     nextExtremeType: "high" | "low" | null;
-    airTemperatureC: number;
-    cloudCoverPct: number;
-    precipitationMm: number;
 }> {
     const apiKey = process.env.STORMGLASS_API_KEY;
     if (!apiKey) {
@@ -67,42 +54,25 @@ async function fetchFromStormglass(): Promise<{
         `${STORMGLASS_BASE_URL}/tide/extremes/point` +
         `?lat=${CORDOVA_CENTER.latitude}&lng=${CORDOVA_CENTER.longitude}` +
         `&start=${now.toISOString()}&end=${twoDaysOut.toISOString()}`;
-    const weatherUrl =
-        `${STORMGLASS_BASE_URL}/weather/point` +
-        `?lat=${CORDOVA_CENTER.latitude}&lng=${CORDOVA_CENTER.longitude}` +
-        `&start=${now.toISOString()}&end=${oneHourOut.toISOString()}` +
-        `&params=airTemperature,cloudCover,precipitation`;
 
-    const [seaLevelRes, extremesRes, weatherRes] = await Promise.all([
+    const [seaLevelRes, extremesRes] = await Promise.all([
         fetch(seaLevelUrl, { headers, signal: AbortSignal.timeout(15_000) }),
         fetch(extremesUrl, { headers, signal: AbortSignal.timeout(15_000) }),
-        fetch(weatherUrl, { headers, signal: AbortSignal.timeout(15_000) }),
     ]);
 
-    if (!seaLevelRes.ok || !extremesRes.ok || !weatherRes.ok) {
+    if (!seaLevelRes.ok || !extremesRes.ok) {
         throw new AppError(
-            `Stormglass request failed (sea-level ${seaLevelRes.status}, extremes ${extremesRes.status}, weather ${weatherRes.status})`,
+            `Stormglass request failed (sea-level ${seaLevelRes.status}, extremes ${extremesRes.status})`,
             502,
         );
     }
 
     const seaLevelBody = (await seaLevelRes.json()) as StormglassSeaLevelResponse;
     const extremesBody = (await extremesRes.json()) as StormglassExtremesResponse;
-    const weatherBody = (await weatherRes.json()) as StormglassWeatherResponse;
 
     const seaLevelPoint = seaLevelBody.data?.[0];
     if (!seaLevelPoint || typeof seaLevelPoint.sg !== "number") {
         throw new AppError("Stormglass returned malformed sea-level data", 502);
-    }
-
-    const weatherPoint = weatherBody.hours?.[0];
-    if (
-        !weatherPoint ||
-        typeof weatherPoint.airTemperature?.sg !== "number" ||
-        typeof weatherPoint.cloudCover?.sg !== "number" ||
-        typeof weatherPoint.precipitation?.sg !== "number"
-    ) {
-        throw new AppError("Stormglass returned malformed weather data", 502);
     }
 
     const nextExtreme = Array.isArray(extremesBody.data) ? extremesBody.data[0] : undefined;
@@ -111,9 +81,48 @@ async function fetchFromStormglass(): Promise<{
         seaLevelM: seaLevelPoint.sg,
         nextExtremeAt: nextExtreme ? new Date(nextExtreme.time) : null,
         nextExtremeType: nextExtreme ? nextExtreme.type : null,
-        airTemperatureC: weatherPoint.airTemperature.sg,
-        cloudCoverPct: weatherPoint.cloudCover.sg,
-        precipitationMm: weatherPoint.precipitation.sg,
+    };
+}
+
+// Open-Meteo's free "current" block -- no API key, no daily-quota ceiling
+// like Stormglass, so this can poll far more often (see tidePolling.ts).
+type OpenMeteoCurrentResponse = {
+    current?: {
+        temperature_2m: number;
+        cloud_cover: number;
+        precipitation: number;
+    };
+};
+
+async function fetchWeatherFromOpenMeteo(): Promise<{
+    airTemperatureC: number;
+    cloudCoverPct: number;
+    precipitationMm: number;
+}> {
+    const url =
+        `${OPEN_METEO_BASE_URL}?latitude=${CORDOVA_CENTER.latitude}&longitude=${CORDOVA_CENTER.longitude}` +
+        `&current=temperature_2m,cloud_cover,precipitation`;
+
+    const res = await fetch(url, { signal: AbortSignal.timeout(15_000) });
+    if (!res.ok) {
+        throw new AppError(`Open-Meteo request failed (${res.status})`, 502);
+    }
+
+    const body = (await res.json()) as OpenMeteoCurrentResponse;
+    const current = body.current;
+    if (
+        !current ||
+        typeof current.temperature_2m !== "number" ||
+        typeof current.cloud_cover !== "number" ||
+        typeof current.precipitation !== "number"
+    ) {
+        throw new AppError("Open-Meteo returned malformed current-weather data", 502);
+    }
+
+    return {
+        airTemperatureC: current.temperature_2m,
+        cloudCoverPct: current.cloud_cover,
+        precipitationMm: current.precipitation,
     };
 }
 
@@ -145,16 +154,20 @@ const RISK_NOTIFICATION_COPY: Record<"watch" | "warning", { title: string; body:
     },
 };
 
-async function refreshTideStatus(): Promise<void> {
+// Placeholder weather values for the (rare) case this creates the row
+// before refreshWeather() ever has -- overwritten within one Open-Meteo
+// poll interval, never user-facing in practice since both polls fire
+// immediately on server boot.
+const PLACEHOLDER_WEATHER = { airTemperatureC: 0, weatherDescription: "Weather unavailable" };
+
+async function refreshTide(): Promise<void> {
     const existing = await prisma.tideStatus.findUnique({ where: { id: "current" } });
-    if (existing && Date.now() - existing.updatedAt.getTime() < FRESHNESS_WINDOW_MS) {
+    if (existing && Date.now() - existing.fetchedAt.getTime() < TIDE_FRESHNESS_WINDOW_MS) {
         return;
     }
 
-    const { seaLevelM, nextExtremeAt, nextExtremeType, airTemperatureC, cloudCoverPct, precipitationMm } =
-        await fetchFromStormglass();
+    const { seaLevelM, nextExtremeAt, nextExtremeType } = await fetchTideFromStormglass();
     const floodRiskLevel = deriveFloodRiskLevel(seaLevelM);
-    const weatherDescription = deriveWeatherDescription(cloudCoverPct, precipitationMm);
     const fetchedAt = new Date();
 
     await prisma.tideStatus.upsert({
@@ -165,17 +178,14 @@ async function refreshTideStatus(): Promise<void> {
             nextExtremeAt,
             nextExtremeType,
             floodRiskLevel,
-            airTemperatureC,
-            weatherDescription,
             fetchedAt,
+            ...PLACEHOLDER_WEATHER,
         },
         update: {
             seaLevelM,
             nextExtremeAt,
             nextExtremeType,
             floodRiskLevel,
-            airTemperatureC,
-            weatherDescription,
             fetchedAt,
         },
     });
@@ -191,6 +201,36 @@ async function refreshTideStatus(): Promise<void> {
             body: copy.body,
         });
     }
+}
+
+// Placeholder tide values for the (rare) case this creates the row before
+// refreshTide() ever has -- see refreshTide's PLACEHOLDER_WEATHER comment,
+// same reasoning the other way around.
+const PLACEHOLDER_TIDE = {
+    seaLevelM: 0,
+    nextExtremeAt: null,
+    nextExtremeType: null,
+    floodRiskLevel: "normal",
+    fetchedAt: new Date(0),
+};
+
+async function refreshWeather(): Promise<void> {
+    const { airTemperatureC, cloudCoverPct, precipitationMm } = await fetchWeatherFromOpenMeteo();
+    const weatherDescription = deriveWeatherDescription(cloudCoverPct, precipitationMm);
+
+    await prisma.tideStatus.upsert({
+        where: { id: "current" },
+        create: {
+            id: "current",
+            airTemperatureC,
+            weatherDescription,
+            ...PLACEHOLDER_TIDE,
+        },
+        update: {
+            airTemperatureC,
+            weatherDescription,
+        },
+    });
 }
 
 async function getLatest(): Promise<{
@@ -218,4 +258,4 @@ async function getLatest(): Promise<{
     };
 }
 
-export const tideService = { refreshTideStatus, getLatest };
+export const tideService = { refreshTide, refreshWeather, getLatest };
