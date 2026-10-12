@@ -1,21 +1,21 @@
 // src/services/responderScope.ts
 // Which responders may act on (accept / decline / be paged for) an incident.
 // One rule, applied server-side to the responder incident list, incident
-// detail, the accept/decline endpoint and new-incident push recipients:
+// detail, the accept/decline endpoint and the new-incident alerts. It's
+// tiered, so MDRRMO only hears about what actually needs them:
 //
-//   - MDRRMO: anywhere in Cordova.
-//   - BDRRMO with an assigned barangay: only incidents placed in it.
-//   - BDRRMO without one, or a responder with no unit: none.
-//   - An incident with no coordinates can't be placed, so MDRRMO only.
+//   1. The BDRRMO responders assigned to the incident's barangay.
+//   2. MDRRMO, as backup -- right away when that barangay has no on-duty
+//      BDRRMO (or the incident can't be placed in a barangay), otherwise
+//      only once it escalates.
+//   3. Escalation: still pending (nobody joined) ESCALATE_AFTER_MS after it
+//      was created -- the admin's Unattended threshold -- it opens to every
+//      responder.
 //
-// Escalation, so no emergency goes unanswered: an incident still pending
-// (nobody has joined) ESCALATE_AFTER_MS after it was created opens up to
-// every responder -- the same 2 minutes after which the admin dashboard
-// flags it Unattended. Until then only the responders in scope see it.
-//
-// The responder's unit and barangay always come from their User row, never
-// from the client. An incident's barangay is the nearest barangay center --
-// the same rule the responder app uses to group its dashboard.
+// A BDRRMO without an assigned barangay, or a responder with no unit, only
+// gets escalated incidents. The responder's unit and barangay always come
+// from their User row, never the client. An incident's barangay is the
+// nearest barangay center -- the same rule the responder app uses.
 import { BARANGAY_CENTERS } from "@/constants/barangayCenters";
 import { isActiveStatus, type ResponderRosterStatus } from "@/services/incidentRoster";
 import { haversineDistanceKm } from "@/utils/geo";
@@ -30,6 +30,9 @@ export type ScopeResponder = {
     assignedBarangay: string | null;
     isOnDuty: boolean;
 };
+
+// Lower-cased names of the barangays with at least one on-duty BDRRMO.
+export type BarangayCoverage = Set<string>;
 
 type IncidentLocation = { latitude: number | null; longitude: number | null };
 export type ScopeIncident = IncidentLocation & { status: string; createdAt: Date };
@@ -51,17 +54,28 @@ export function incidentBarangayName(incident: IncidentLocation): string | null 
     return nearest.name;
 }
 
-// The responder's own territory: their barangay (BDRRMO) or all of Cordova
-// (MDRRMO). Escalation aside.
-export function isInScope(responder: ScopeResponder, incident: IncidentLocation): boolean {
-    if (responder.role !== "responder") return false;
-    if (responder.unit === "MDRRMO") return true;
-    const barangay = incidentBarangayName(incident);
-    if (responder.unit !== "BDRRMO" || !responder.assignedBarangay || !barangay) return false;
-    return normalize(responder.assignedBarangay) === normalize(barangay);
+export function coverageFrom(responders: ScopeResponder[]): BarangayCoverage {
+    return new Set(
+        responders
+            .filter((r) => r.role === "responder" && r.isOnDuty && r.unit === "BDRRMO" && r.assignedBarangay)
+            .map((r) => normalize(r.assignedBarangay as string)),
+    );
 }
 
-// Still pending, and nobody in scope took it within ESCALATE_AFTER_MS.
+// Tier 1: a BDRRMO responder assigned to the incident's barangay.
+export function isAssignedBarangay(responder: ScopeResponder, incident: IncidentLocation): boolean {
+    if (responder.role !== "responder" || responder.unit !== "BDRRMO" || !responder.assignedBarangay) return false;
+    const barangay = incidentBarangayName(incident);
+    return barangay !== null && normalize(responder.assignedBarangay) === normalize(barangay);
+}
+
+// The incident's barangay has an on-duty BDRRMO to handle it first.
+export function hasBarangayCover(incident: IncidentLocation, coverage: BarangayCoverage): boolean {
+    const barangay = incidentBarangayName(incident);
+    return barangay !== null && coverage.has(normalize(barangay));
+}
+
+// Still pending, and nobody took it within ESCALATE_AFTER_MS.
 export function isEscalated(incident: ScopeIncident, now = new Date()): boolean {
     return incident.status === "pending" && now.getTime() - incident.createdAt.getTime() >= ESCALATE_AFTER_MS;
 }
@@ -69,16 +83,24 @@ export function isEscalated(incident: ScopeIncident, now = new Date()): boolean 
 export function canRespondToIncident(
     responder: ScopeResponder,
     incident: ScopeIncident,
+    coverage: BarangayCoverage,
     now = new Date(),
 ): boolean {
     if (responder.role !== "responder") return false;
-    return isInScope(responder, incident) || isEscalated(incident, now);
+    if (isAssignedBarangay(responder, incident)) return true;
+    if (responder.unit === "MDRRMO" && !hasBarangayCover(incident, coverage)) return true;
+    return isEscalated(incident, now);
 }
 
-// For the app's label: this responder can act on it only because it was
-// escalated (it's outside their own territory).
-export function isEscalatedFor(responder: ScopeResponder, incident: ScopeIncident, now = new Date()): boolean {
-    return responder.role === "responder" && !isInScope(responder, incident) && isEscalated(incident, now);
+// For the app's note: they can act on it, but it isn't their own barangay
+// -- it reached them as backup or because it escalated.
+export function isOpenAsBackup(
+    responder: ScopeResponder,
+    incident: ScopeIncident,
+    coverage: BarangayCoverage,
+    now = new Date(),
+): boolean {
+    return canRespondToIncident(responder, incident, coverage, now) && !isAssignedBarangay(responder, incident);
 }
 
 // Joining (accepting), declining, or rejoining after leaving needs scope.
@@ -92,24 +114,19 @@ export function isResponseActionAllowed(
     return canRespond;
 }
 
-// Who gets the new_incident alert when an incident is created: on-duty
-// responders whose territory it's in.
-export function selectNewIncidentRecipients(
-    responders: ScopeResponder[],
-    incident: IncidentLocation,
-): string[] {
-    return responders.filter((r) => r.isOnDuty && isInScope(r, incident)).map((r) => r.id);
+// The first alert, when the incident is created: the on-duty BDRRMO of its
+// barangay -- or, if there are none, the on-duty MDRRMO.
+export function selectNewIncidentRecipients(responders: ScopeResponder[], incident: IncidentLocation): string[] {
+    const onDuty = responders.filter((r) => r.role === "responder" && r.isOnDuty);
+    const assigned = onDuty.filter((r) => isAssignedBarangay(r, incident));
+    if (assigned.length > 0) return assigned.map((r) => r.id);
+    return onDuty.filter((r) => r.unit === "MDRRMO").map((r) => r.id);
 }
 
-// Who gets the escalation alert: the on-duty responders outside its
-// territory (those inside already got the first alert), minus anyone who
-// already has a roster row on it (e.g. declined).
-export function selectEscalationRecipients(
-    responders: ScopeResponder[],
-    incident: IncidentLocation,
-    excludeIds: Set<string>,
-): string[] {
+// The escalation alert: every on-duty responder who hasn't already been
+// alerted about it or put on its roster (e.g. declined).
+export function selectEscalationRecipients(responders: ScopeResponder[], excludeIds: Set<string>): string[] {
     return responders
-        .filter((r) => r.role === "responder" && r.isOnDuty && !isInScope(r, incident) && !excludeIds.has(r.id))
+        .filter((r) => r.role === "responder" && r.isOnDuty && !excludeIds.has(r.id))
         .map((r) => r.id);
 }
