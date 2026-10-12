@@ -17,11 +17,13 @@ import { resolveUrgency } from "@/services/incidentUrgency";
 import { ROSTER_NOTIFICATION_COPY } from "@/services/rosterNotificationCopy";
 import { incidentStatusToAlertOutcome } from "@/services/sosAlertStatus";
 import {
+    ESCALATE_AFTER_MS,
     canRespondToIncident,
-    coverageFrom,
+    isEscalatedFor,
     isResponseActionAllowed,
+    selectEscalationRecipients,
     selectNewIncidentRecipients,
-    type ResponderCoverage,
+    type ScopeIncident,
     type ScopeResponder,
 } from "@/services/responderScope";
 
@@ -33,8 +35,7 @@ const SCOPE_RESPONDER_SELECT = {
     isOnDuty: true,
 } as const;
 
-// Every on-duty responder, from their User rows -- both the coverage
-// snapshot (is anyone in scope on duty?) and the push recipient pool.
+// Every on-duty responder, from their User rows -- the push recipient pool.
 async function loadOnDutyResponders(): Promise<ScopeResponder[]> {
     return prisma.user.findMany({
         where: { role: "responder", isOnDuty: true },
@@ -42,35 +43,39 @@ async function loadOnDutyResponders(): Promise<ScopeResponder[]> {
     });
 }
 
-// The requester's own unit/barangay from their User row (never the client)
-// plus the current coverage, for per-incident canRespond checks.
-async function loadScopeContext(
-    requesterId: string,
-): Promise<{ requester: ScopeResponder | null; coverage: ResponderCoverage }> {
-    const [requester, onDuty] = await Promise.all([
-        prisma.user.findUnique({ where: { id: requesterId }, select: SCOPE_RESPONDER_SELECT }),
-        loadOnDutyResponders(),
-    ]);
-    return { requester, coverage: coverageFrom(onDuty) };
+// The requester's own unit/barangay from their User row (never the client),
+// for per-incident canRespond checks.
+async function loadScopeResponder(requesterId: string): Promise<ScopeResponder | null> {
+    return prisma.user.findUnique({ where: { id: requesterId }, select: SCOPE_RESPONDER_SELECT });
 }
 
-function canRequesterRespond(
-    context: { requester: ScopeResponder | null; coverage: ResponderCoverage },
-    incident: { latitude: number | null; longitude: number | null },
-): boolean {
-    return context.requester ? canRespondToIncident(context.requester, incident, context.coverage) : false;
+// canRespond (may accept/decline) and escalated (only because nobody in
+// scope took it within ESCALATE_AFTER_MS) for one caller and incident.
+function scopeFlags(requester: ScopeResponder | null, incident: ScopeIncident, now = new Date()) {
+    if (!requester) return { canRespond: false, escalated: false };
+    return {
+        canRespond: canRespondToIncident(requester, incident, now),
+        escalated: isEscalatedFor(requester, incident, now),
+    };
 }
 
-// The new_incident push / in-app alert goes only to on-duty responders who
-// can respond to this incident (see responderScope.ts) -- not every
-// responder in Cordova.
+// The escalation alert's title, also used to tell whether one was already
+// sent for an incident (no extra column needed).
+const ESCALATION_TITLE = "Unanswered emergency nearby";
+// Escalation only looks this far back, so a first run after downtime
+// doesn't page everyone about long-stale incidents.
+const ESCALATION_LOOKBACK_MS = 60 * 60 * 1000;
+
+// The first new_incident push / in-app alert goes only to on-duty
+// responders whose territory the incident is in (see responderScope.ts);
+// everyone else hears about it only if it escalates.
 async function notifyRespondersOfNewIncident(
     incident: { id: string; latitude: number | null; longitude: number | null },
     copy: { title: string; body: string },
 ) {
     try {
         const onDuty = await loadOnDutyResponders();
-        const recipients = selectNewIncidentRecipients(onDuty, incident, coverageFrom(onDuty));
+        const recipients = selectNewIncidentRecipients(onDuty, incident);
         await notificationService.createForUsers(recipients, {
             type: "new_incident",
             ...copy,
@@ -394,7 +399,8 @@ export const incidentService = {
             orderBy: { createdAt: "desc" },
             include: { responders: { include: { responder: { select: { name: true } } } } },
         });
-        const scope = await loadScopeContext(responderId);
+        const requester = await loadScopeResponder(responderId);
+        const now = new Date();
 
         return incidents.map(({ responders, ...incident }) => {
             const shaped = shapeResponders(responders);
@@ -405,11 +411,12 @@ export const incidentService = {
                 respondersCount: shaped.respondersCount,
                 responders: shaped.activeResponders,
                 myStatus: myRow?.status ?? "pending",
-                // Whether this caller may accept/decline it. The full list
-                // stays visible (the Live Map is read-only situational
-                // awareness); the app only alerts on, and offers actions
-                // for, incidents where this is true.
-                canRespond: canRequesterRespond(scope, incident),
+                // canRespond: whether this caller may accept/decline it. The
+                // full list stays visible (the Live Map is read-only
+                // situational awareness); the app only alerts on, and offers
+                // actions for, these. escalated: open to them only because
+                // nobody in scope took it in time.
+                ...scopeFlags(requester, incident, now),
             };
         });
     },
@@ -464,7 +471,7 @@ export const incidentService = {
         return {
             ...result,
             reporterContact: await loadReporterContact(incident.reporterId, result.myStatus),
-            canRespond: canRequesterRespond(await loadScopeContext(requesterId), incident),
+            ...scopeFlags(await loadScopeResponder(requesterId), incident),
         };
     },
 
@@ -497,8 +504,8 @@ export const incidentService = {
         // incident (their own User row, server-side); someone already on the
         // roster may keep going or leave. See responderScope.ts.
         if (!(currentStatus && isActiveStatus(currentStatus))) {
-            const scope = await loadScopeContext(responderId);
-            if (!isResponseActionAllowed(currentStatus, canRequesterRespond(scope, incident))) {
+            const { canRespond } = scopeFlags(await loadScopeResponder(responderId), incident);
+            if (!isResponseActionAllowed(currentStatus, canRespond)) {
                 throw new AppError("This incident is outside your assigned barangay", 403);
             }
         }
@@ -636,6 +643,67 @@ export const incidentService = {
         const result = buildResponderFacingIncident(updatedIncident, allRows, reporterId);
         emitAdminIncidentUpdate(toAdminIncidentPayload(result));
         return result;
+    },
+
+    // Pages the on-duty responders outside an incident's territory once it
+    // has gone ESCALATE_AFTER_MS with nobody joining (see responderScope.ts):
+    // from then on any responder may take it, so they need to hear about
+    // it. Once per incident -- an escalation alert already sent for it is
+    // found by its title, so this needs no extra column. Run on an interval
+    // by incidentEscalationPolling.ts. Returns how many incidents escalated.
+    async escalateUnattendedIncidents(now = new Date()) {
+        const due = await prisma.incident.findMany({
+            where: {
+                status: "pending",
+                createdAt: {
+                    lte: new Date(now.getTime() - ESCALATE_AFTER_MS),
+                    gte: new Date(now.getTime() - ESCALATION_LOOKBACK_MS),
+                },
+            },
+            select: {
+                id: true,
+                source: true,
+                locationLabel: true,
+                latitude: true,
+                longitude: true,
+                responders: { select: { responderId: true } },
+            },
+        });
+        if (due.length === 0) return 0;
+
+        const alreadySent = new Set(
+            (
+                await prisma.notification.findMany({
+                    where: {
+                        type: "new_incident",
+                        title: ESCALATION_TITLE,
+                        referenceId: { in: due.map((i) => i.id) },
+                    },
+                    select: { referenceId: true },
+                    distinct: ["referenceId"],
+                })
+            ).map((n) => n.referenceId),
+        );
+
+        const onDuty = await loadOnDutyResponders();
+        let escalated = 0;
+        for (const incident of due) {
+            if (alreadySent.has(incident.id)) continue;
+            const recipients = selectEscalationRecipients(
+                onDuty,
+                incident,
+                new Set(incident.responders.map((r) => r.responderId)),
+            );
+            if (recipients.length === 0) continue;
+            await notificationService.createForUsers(recipients, {
+                type: "new_incident",
+                title: ESCALATION_TITLE,
+                body: `${incident.source === "sos" ? "An SOS alert" : "A reported incident"} near ${incident.locationLabel} has had no responder for 2 minutes. You can respond.`,
+                referenceId: incident.id,
+            });
+            escalated++;
+        }
+        return escalated;
     },
 
     // Moves every SOS incident still "pending" (no responder ever joined)

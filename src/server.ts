@@ -1,6 +1,7 @@
 import http from "http";
 
 import app from "./app";
+import { startIncidentEscalationPolling } from "@/lib/incidentEscalationPolling";
 import { startSosExpiryPolling } from "@/lib/sosExpiryPolling";
 import { startTidePolling } from "@/lib/tidePolling";
 import { initRealtime } from "@/realtime/socket";
@@ -24,4 +25,5 @@ httpServer.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
     startTidePolling();
     startSosExpiryPolling();
+    startIncidentEscalationPolling();
 });
