@@ -12,7 +12,7 @@ const parser = multer({
     // fields at most, so a request can't stuff the form with junk.
     limits: { fileSize: MAX_INCIDENT_PHOTO_BYTES, files: 1, fields: 5, fieldSize: 1024, parts: 6 },
     fileFilter(_req, file, callback) {
-        if (isAllowedIncidentPhotoType(file.mimetype)) return callback(null, true);
+        if (isAllowedIncidentPhotoType(file.mimetype, file.originalname)) return callback(null, true);
         callback(new AppError("Only JPEG, PNG, WebP or HEIC photos can be attached", 400));
     },
 }).single("photo");

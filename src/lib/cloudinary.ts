@@ -6,7 +6,8 @@
 // without the photo.
 import { v2 as cloudinary, type UploadApiOptions, type UploadApiResponse } from "cloudinary";
 
-import { cloudinaryPublicId, isOwnCloudinaryUrl } from "@/services/incidentPhoto";
+import { classifyCloudinaryError, cloudinaryPublicId, isOwnCloudinaryUrl } from "@/services/incidentPhoto";
+import { AppError } from "@/utils/AppError";
 
 const INCIDENT_PHOTO_FOLDER = "cordova-riskq/incidents";
 const AVATAR_FOLDER = "cordova-riskq/avatars";
@@ -40,7 +41,15 @@ function uploadImage(file: Buffer, options: UploadApiOptions): Promise<string> {
     return new Promise((resolve, reject) => {
         cloudinary.uploader
             .upload_stream({ resource_type: "image", ...options }, (error, result?: UploadApiResponse) => {
-                if (error || !result) return reject(error ?? new Error("Empty Cloudinary response"));
+                if (error) {
+                    const failure = classifyCloudinaryError(error);
+                    if (!failure) return reject(error);
+                    // Credentials trouble is ours to fix -- keep Cloudinary's
+                    // own reason in the logs, not in the app.
+                    if (failure.status === 503) console.error("Cloudinary rejected our credentials:", error);
+                    return reject(new AppError(failure.message, failure.status));
+                }
+                if (!result) return reject(new Error("Empty Cloudinary response"));
                 resolve(result.secure_url);
             })
             .end(file);

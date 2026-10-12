@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { cloudinaryPublicId, isAllowedIncidentPhotoType, isOwnCloudinaryUrl } from "@/services/incidentPhoto";
+import {
+    classifyCloudinaryError,
+    cloudinaryPublicId,
+    isAllowedIncidentPhotoType,
+    isOwnCloudinaryUrl,
+} from "@/services/incidentPhoto";
 import { createIncidentSchema } from "@/validations/incident.validation";
 
 const FOLDER = "cordova-riskq/incidents";
@@ -28,6 +33,15 @@ test("only image types are accepted for upload", () => {
     assert.equal(isAllowedIncidentPhotoType("image/svg+xml"), false);
 });
 
+test("an untyped upload counts as a photo only by its image file extension", () => {
+    assert.equal(isAllowedIncidentPhotoType("application/octet-stream", "abc.jpg"), true);
+    assert.equal(isAllowedIncidentPhotoType("", "abc.HEIC"), true);
+    assert.equal(isAllowedIncidentPhotoType("application/octet-stream", "evil.exe"), false);
+    assert.equal(isAllowedIncidentPhotoType("application/octet-stream", "jpg"), false);
+    // A declared non-image type is never rescued by its name.
+    assert.equal(isAllowedIncidentPhotoType("text/html", "page.jpg"), false);
+});
+
 test("a report may carry an optional photoUrl", () => {
     const base = {
         category: "fire",
@@ -48,4 +62,17 @@ test("finds the public id of one of our photos, for deleting it", () => {
     assert.equal(cloudinaryPublicId(avatar, "someone-else"), null);
     assert.equal(cloudinaryPublicId("https://evil.example/riskq/image/upload/a.jpg", "riskq"), null);
     assert.equal(cloudinaryPublicId("nope", "riskq"), null);
+});
+
+test("a Cloudinary refusal becomes a clear answer instead of a 500", () => {
+    assert.deepEqual(classifyCloudinaryError({ http_code: 400, message: "Invalid image file" }), {
+        status: 400,
+        message: "That file isn't a photo we can use",
+    });
+    // e.g. "Invalid Signature" from a wrong API secret.
+    assert.equal(classifyCloudinaryError({ http_code: 401, message: "Invalid Signature" })?.status, 503);
+    assert.equal(classifyCloudinaryError({ http_code: 403 })?.status, 503);
+    assert.equal(classifyCloudinaryError({ http_code: 500 }), null);
+    assert.equal(classifyCloudinaryError(new Error("socket hang up")), null);
+    assert.equal(classifyCloudinaryError(null), null);
 });
