@@ -191,7 +191,7 @@ type ResponderRowWithName = {
     responderId: string;
     status: string;
     createdAt: Date;
-    responder: { name: string | null };
+    responder: { name: string | null; avatarUrl: string | null };
 };
 
 function shapeResponders(rows: ResponderRowWithName[]) {
@@ -210,6 +210,7 @@ function shapeResponders(rows: ResponderRowWithName[]) {
             id: r.responderId,
             name: r.responder.name ?? "Responder",
             status: r.status,
+            avatarUrl: r.responder.avatarUrl,
         })),
     };
 }
@@ -293,7 +294,7 @@ function toAdminIncidentPayload(
 async function broadcastIncidentState(id: string) {
     const incident = await prisma.incident.findUniqueOrThrow({
         where: { id },
-        include: { responders: { include: { responder: { select: { name: true } } } } },
+        include: { responders: { include: { responder: { select: { name: true, avatarUrl: true } } } } },
     });
     const { responders, ...rest } = incident;
     const shaped = buildResponderFacingIncident(rest, responders, "");
@@ -416,7 +417,7 @@ export const incidentService = {
                 responders: { none: { responderId, status: "declined" } },
             },
             orderBy: { createdAt: "desc" },
-            include: { responders: { include: { responder: { select: { name: true } } } } },
+            include: { responders: { include: { responder: { select: { name: true, avatarUrl: true } } } } },
         });
         const scope = await loadScopeContext(responderId);
         const now = new Date();
@@ -460,7 +461,7 @@ export const incidentService = {
     async getById(id: string, requesterId: string) {
         const incident = await prisma.incident.findUnique({
             where: { id },
-            include: { responders: { include: { responder: { select: { name: true } } } } },
+            include: { responders: { include: { responder: { select: { name: true, avatarUrl: true } } } } },
         });
         if (!incident) throw new AppError("Incident not found", 404);
 
@@ -538,7 +539,7 @@ export const incidentService = {
 
         const allRows = await prisma.incidentResponder.findMany({
             where: { incidentId: id },
-            include: { responder: { select: { name: true } } },
+            include: { responder: { select: { name: true, avatarUrl: true } } },
         });
         const activeStatuses = allRows
             .filter((r) => isActiveStatus(r.status as ResponderRosterStatus))
@@ -622,7 +623,7 @@ export const incidentService = {
 
         const allRows = await prisma.incidentResponder.findMany({
             where: { incidentId: id },
-            include: { responder: { select: { name: true } } },
+            include: { responder: { select: { name: true, avatarUrl: true } } },
         });
 
         if (statusChanged) {
@@ -657,7 +658,7 @@ export const incidentService = {
 
         const allRows = await prisma.incidentResponder.findMany({
             where: { incidentId: id },
-            include: { responder: { select: { name: true } } },
+            include: { responder: { select: { name: true, avatarUrl: true } } },
         });
 
         const result = buildResponderFacingIncident(updatedIncident, allRows, reporterId);

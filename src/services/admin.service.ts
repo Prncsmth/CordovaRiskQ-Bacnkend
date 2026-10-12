@@ -1,9 +1,22 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
 import { mergeRecentActivity, supportRequestDetail, type AdminActivityItem } from "@/services/adminActivity";
+import { logAdminAction } from "@/services/adminAuditLog.service";
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const NON_TERMINAL_STATUSES = ["pending", "lobby", "on_the_way", "arrived"];
+
+// One Recent Activity title per AdminAuditLog action -- the admin's name
+// and the specifics already live in the row's own `detail` (see
+// adminAuditLog.service.ts's logAdminAction).
+const AUDIT_ACTION_TITLE: Record<string, string> = {
+    announcement_created: "Announcement published",
+    announcement_updated: "Announcement edited",
+    announcement_deleted: "Announcement deleted",
+    responder_barangay_updated: "Responder barangay assigned",
+    user_role_updated: "User role changed",
+    support_request_status_updated: "Support request updated",
+};
 
 export const adminService = {
     async listUsers(filters: {
@@ -103,7 +116,7 @@ export const adminService = {
         return users.map((user) => ({ id: user.id, name: user.name ?? user.email }));
     },
 
-    async updateUserRole(targetUserId: string, role: string, unit?: string | null) {
+    async updateUserRole(targetUserId: string, role: string, unit: string | null | undefined, adminId: string) {
         const target = await prisma.user.findUnique({ where: { id: targetUserId } });
         if (!target) throw new AppError("User not found", 404);
         if (target.role === "admin") {
@@ -117,6 +130,13 @@ export const adminService = {
             // stale BDRRMO/MDRRMO classification from a prior promotion.
             data: { role, unit: role === "responder" ? unit : null },
         });
+
+        await logAdminAction(
+            adminId,
+            "user_role_updated",
+            `Changed ${updated.name ?? updated.email}'s role from "${target.role}" to "${role}"`,
+            updated.id,
+        );
 
         return {
             id: updated.id,
@@ -132,7 +152,7 @@ export const adminService = {
     // there's no mobile UI for this), independent of role/unit since an
     // already-classified responder's coverage area can change without a
     // promotion happening alongside it.
-    async updateResponderBarangay(targetUserId: string, barangay: string | null) {
+    async updateResponderBarangay(targetUserId: string, barangay: string | null, adminId: string) {
         const target = await prisma.user.findUnique({ where: { id: targetUserId } });
         if (!target) throw new AppError("User not found", 404);
         if (target.role !== "responder") {
@@ -143,6 +163,13 @@ export const adminService = {
             where: { id: targetUserId },
             data: { assignedBarangay: barangay },
         });
+
+        await logAdminAction(
+            adminId,
+            "responder_barangay_updated",
+            `Assigned ${target.name ?? target.email} to ${barangay ?? "no barangay"}`,
+            updated.id,
+        );
 
         return {
             id: updated.id,
@@ -209,7 +236,7 @@ export const adminService = {
         const cappedLimit = Math.min(Math.max(limit, 1), 100);
         const take = cappedLimit;
 
-        const [sosAlerts, reportedIncidents, joinedRows, resolvedIncidents, evacuationCenters, newUsers, supportRequests] = await Promise.all([
+        const [sosAlerts, reportedIncidents, joinedRows, resolvedIncidents, evacuationCenters, newUsers, supportRequests, auditLogs] = await Promise.all([
             prisma.sosAlert.findMany({
                 orderBy: { createdAt: "desc" },
                 take,
@@ -250,6 +277,10 @@ export const adminService = {
                 orderBy: { createdAt: "desc" },
                 take,
                 include: { user: { select: { name: true } } },
+            }),
+            prisma.adminAuditLog.findMany({
+                orderBy: { createdAt: "desc" },
+                take,
             }),
         ]);
 
@@ -305,6 +336,12 @@ export const adminService = {
                 title: "New support request",
                 detail: supportRequestDetail(request.subject, request.topic, request.user.name),
                 occurredAt: request.createdAt.toISOString(),
+            })),
+            ...auditLogs.map((log) => ({
+                type: log.action as AdminActivityItem["type"],
+                title: AUDIT_ACTION_TITLE[log.action] ?? "Admin action",
+                detail: log.detail,
+                occurredAt: log.createdAt.toISOString(),
             })),
         ];
 

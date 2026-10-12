@@ -42,12 +42,12 @@ export const announcementController = {
     }),
 
     update: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const announcement = await announcementService.update(req.params.id as string, req.body);
+        const announcement = await announcementService.update(req.params.id as string, req.body, req.userId!);
         res.status(200).json({ success: true, announcement });
     }),
 
     remove: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        await announcementService.remove(req.params.id as string);
+        await announcementService.remove(req.params.id as string, req.userId!);
         res.status(200).json({ success: true });
     }),
 };
