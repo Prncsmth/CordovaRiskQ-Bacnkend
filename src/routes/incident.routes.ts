@@ -2,7 +2,8 @@ import { Router } from "express";
 import { incidentController } from "@/controllers/incident.controller";
 import { authenticate } from "@/middlewares/authenticate.middleware";
 import { requireIncidentInsideCordova } from "@/middlewares/geofence.middleware";
-import { reportLimiter } from "@/middlewares/rateLimit.middleware";
+import { parseIncidentPhoto } from "@/middlewares/incidentPhotoUpload.middleware";
+import { incidentPhotoLimiter, reportLimiter } from "@/middlewares/rateLimit.middleware";
 import { requireResponder } from "@/middlewares/requireResponder.middleware";
 import { requireResponderOrAdmin } from "@/middlewares/requireResponderOrAdmin.middleware";
 import { validate } from "@/middlewares/validate.middleware";
@@ -23,6 +24,15 @@ router.post(
     validate(createIncidentSchema),
     requireIncidentInsideCordova,
     incidentController.create
+);
+// The report screen uploads its photo first, then sends the returned
+// photoUrl with POST /incidents.
+router.post(
+    "/incidents/photo",
+    authenticate,
+    incidentPhotoLimiter,
+    parseIncidentPhoto,
+    incidentController.uploadPhoto
 );
 // City-wide active-incident list is responder/admin facing -- a citizen
 // uses /incidents/mine for their own reports instead. Was previously

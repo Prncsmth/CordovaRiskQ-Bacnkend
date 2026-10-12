@@ -1,12 +1,24 @@
 import { Response } from "express";
 import { AuthenticatedRequest } from "@/middlewares/authenticate.middleware";
 import { userService } from "@/services/user.service";
+import { AppError } from "@/utils/AppError";
 import { asyncHandler } from "@/utils/asyncHandler";
 
 export const userController = {
     getMe: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
         const user = await userService.getById(req.userId!);
         res.status(200).json({ success: true, user });
+    }),
+
+    uploadAvatar: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        if (!req.file) throw new AppError("Attach a photo in the \"photo\" field", 400);
+        const avatarUrl = await userService.setAvatar(req.userId!, req.file.buffer);
+        res.status(200).json({ success: true, avatarUrl });
+    }),
+
+    removeAvatar: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        await userService.removeAvatar(req.userId!);
+        res.status(200).json({ success: true, avatarUrl: null });
     }),
 
     updateProfile: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {

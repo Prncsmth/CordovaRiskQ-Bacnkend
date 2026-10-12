@@ -20,6 +20,10 @@ model User {
   googleId           String?    @unique
   name               String?
   mobile             String?
+  // Optional profile photo (Cloudinary URL, POST /users/me/avatar). Shown to
+  // the citizens a responder is helping, and a citizen's to the responders
+  // actively on their incident (reporterContact.ts) -- never in public lists.
+  avatarUrl          String?
   role               String     @default("citizen")
   unit               String?    // responder org classification: "BDRRMO" | "MDRRMO" -- unset for non-responders
   // Admin-assigned home barangay, one of CORDOVA_BARANGAY_NAMES -- not the
@@ -89,6 +93,8 @@ model Incident {
   sosAlertId             String?
   category               String
   details                String?
+  // Cloudinary secure_url of the reporter's photo (POST /incidents/photo); null = no photo.
+  photoUrl               String?
   locationLabel          String
   latitude               Float?
   longitude              Float?

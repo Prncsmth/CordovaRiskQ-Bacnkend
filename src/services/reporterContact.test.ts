@@ -10,6 +10,7 @@ test("a responder on the incident (joined, on the way, arrived) gets the reporte
         assert.deepEqual(reporterContactFor(status, reporter), {
             name: "Juana Dela Cruz",
             mobile: "+63 917 123 4567",
+            avatarUrl: null,
         });
     }
 });
@@ -22,15 +23,23 @@ test("a responder not on the roster, or who declined or left, gets nothing", () 
 });
 
 test("a missing, blank or too-short number is reported as unavailable, not handed to the dialer", () => {
-    assert.deepEqual(reporterContactFor("joined", { name: "Juana", mobile: null }), { name: "Juana", mobile: null });
-    assert.deepEqual(reporterContactFor("joined", { name: "Juana", mobile: "   " }), { name: "Juana", mobile: null });
-    assert.deepEqual(reporterContactFor("joined", { name: "Juana", mobile: "12345" }), { name: "Juana", mobile: null });
+    const noNumber = { name: "Juana", mobile: null, avatarUrl: null };
+    assert.deepEqual(reporterContactFor("joined", { name: "Juana", mobile: null }), noNumber);
+    assert.deepEqual(reporterContactFor("joined", { name: "Juana", mobile: "   " }), noNumber);
+    assert.deepEqual(reporterContactFor("joined", { name: "Juana", mobile: "12345" }), noNumber);
 });
 
 test("a blank name comes back as null, and a missing reporter gives nothing", () => {
     assert.deepEqual(reporterContactFor("arrived", { name: "  ", mobile: "09171234567" }), {
         name: null,
         mobile: "09171234567",
+        avatarUrl: null,
     });
     assert.equal(reporterContactFor("arrived", null), null);
+});
+
+test("the reporter's optional profile photo comes along, only with the rest of the contact", () => {
+    const withPhoto = { ...reporter, avatarUrl: "https://res.cloudinary.com/x/image/upload/a.jpg" };
+    assert.equal(reporterContactFor("joined", withPhoto)?.avatarUrl, withPhoto.avatarUrl);
+    assert.equal(reporterContactFor("declined", withPhoto), null);
 });

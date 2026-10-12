@@ -2,6 +2,8 @@ import { Response } from "express";
 import { AuthenticatedRequest } from "@/middlewares/authenticate.middleware";
 import { incidentService } from "@/services/incident.service";
 import { trackingService } from "@/services/tracking.service";
+import { isCloudinaryConfigured, uploadIncidentPhoto } from "@/lib/cloudinary";
+import { AppError } from "@/utils/AppError";
 import { asyncHandler } from "@/utils/asyncHandler";
 import { emitIncidentUpdate } from "@/realtime/emit";
 
@@ -9,6 +11,15 @@ export const incidentController = {
     create: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
         const incident = await incidentService.create(req.userId!, req.body);
         res.status(201).json({ success: true, incident });
+    }),
+
+    uploadPhoto: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
+        if (!isCloudinaryConfigured()) {
+            throw new AppError("Photo upload is not available right now", 503);
+        }
+        if (!req.file) throw new AppError("Attach a photo in the \"photo\" field", 400);
+        const photoUrl = await uploadIncidentPhoto(req.file.buffer);
+        res.status(201).json({ success: true, photoUrl });
     }),
 
     list: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {

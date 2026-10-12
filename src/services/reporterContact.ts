@@ -14,11 +14,13 @@ export type ReporterContact = {
     // Null when the reporter has no usable number saved -- the app then shows
     // Call as unavailable.
     mobile: string | null;
+    // Their optional profile photo, so the responder knows who to look for.
+    avatarUrl: string | null;
 };
 
 export function reporterContactFor(
     requesterRosterStatus: ResponderRosterStatus | null | undefined,
-    reporter: { name: string | null; mobile: string | null } | null | undefined,
+    reporter: { name: string | null; mobile: string | null; avatarUrl?: string | null } | null | undefined,
 ): ReporterContact | null {
     if (!requesterRosterStatus || !isActiveStatus(requesterRosterStatus) || !reporter) return null;
     const mobile = reporter.mobile?.trim() ?? "";
@@ -27,5 +29,6 @@ export function reporterContactFor(
         name: name.length > 0 ? name : null,
         // Same "is this dialable" rule as the primary responder's contact.
         mobile: mobile.replace(/\D/g, "").length >= 7 ? mobile : null,
+        avatarUrl: reporter.avatarUrl ?? null,
     };
 }

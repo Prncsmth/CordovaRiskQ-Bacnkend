@@ -119,6 +119,22 @@ export const reportLimiter = createRateLimiter(
     perUserKey
 );
 
+// Photos for reports: a few retries per report on top of the report limit.
+export const incidentPhotoLimiter = createRateLimiter(
+    10 * 60 * 1000,
+    15,
+    "Too many photo uploads in a short time. Please wait a few minutes and try again.",
+    perUserKey
+);
+
+// Profile photo changes -- plenty for trying a few pictures, not a loop.
+export const avatarLimiter = createRateLimiter(
+    60 * 60 * 1000,
+    20,
+    "Too many profile photo changes. Please try again later.",
+    perUserKey
+);
+
 export const supportRequestLimiter = createRateLimiter(
     60 * 60 * 1000,
     10,

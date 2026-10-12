@@ -62,6 +62,12 @@ async function sendPushToRecipients(
                 title: data.title,
                 body: data.body,
                 data: expoData,
+                // Audible + delivered right away: "default" is the device's
+                // own notification sound (iOS; Android takes it from the
+                // app's "default" channel), and high priority wakes a
+                // dozing Android phone instead of batching the alert.
+                sound: "default" as const,
+                priority: "high" as const,
             }));
 
             const response = await fetch(EXPO_PUSH_URL, {

@@ -133,6 +133,7 @@ export const trackingService = {
                 // never copied into the per-responder `responders` entries.
                 mobile: true,
                 unit: true,
+                avatarUrl: true,
             },
         });
         const usersById = new Map(users.map((u) => [u.id, u]));
@@ -147,6 +148,9 @@ export const trackingService = {
                 {
                     responderId: user.id,
                     responderName: user.name ?? "Responder",
+                    // Their profile photo, so the citizen can recognize who's
+                    // coming. Null when they haven't set one.
+                    responderAvatarUrl: user.avatarUrl,
                     ...location,
                     status: row.status,
                     etaMinutes: estimateEtaMinutes(row.status, location, incident),

@@ -1,12 +1,40 @@
 import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
+import { deleteAvatar, isCloudinaryConfigured, uploadAvatar } from "@/lib/cloudinary";
 import { disconnectUserSockets, emitAdminResponderDutyChanged } from "@/realtime/emit";
 import { assertEmailUnchanged } from "@/services/accountEmail";
 import { changePassword } from "@/services/changePasswordFlow";
 import { issueSessionToken, passwordUpdateData } from "@/services/sessionAuth";
 
 export const userService = {
+    // Replaces the profile photo; the old one is removed from Cloudinary.
+    async setAvatar(userId: string, file: Buffer) {
+        if (!isCloudinaryConfigured()) {
+            throw new AppError("Photo upload is not available right now", 503);
+        }
+        const current = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { avatarUrl: true },
+        });
+        if (!current) throw new AppError("User not found", 404);
+        const avatarUrl = await uploadAvatar(file);
+        await prisma.user.update({ where: { id: userId }, data: { avatarUrl } });
+        if (current.avatarUrl) await deleteAvatar(current.avatarUrl);
+        return avatarUrl;
+    },
+
+    async removeAvatar(userId: string) {
+        const current = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { avatarUrl: true },
+        });
+        if (!current) throw new AppError("User not found", 404);
+        if (!current.avatarUrl) return;
+        await prisma.user.update({ where: { id: userId }, data: { avatarUrl: null } });
+        await deleteAvatar(current.avatarUrl);
+    },
+
     async getById(userId: string) {
         const user = await prisma.user.findUnique({ where: { id: userId } });
         if (!user) throw new AppError("User not found", 404);
@@ -16,6 +44,7 @@ export const userService = {
             name: user.name,
             email: user.email,
             mobile: user.mobile,
+            avatarUrl: user.avatarUrl,
             // False for an account created through Google Sign-In, which has
             // no password -- the app hides Change Password for it.
             hasPassword: user.password !== null,

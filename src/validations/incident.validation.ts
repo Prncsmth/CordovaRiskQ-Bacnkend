@@ -12,6 +12,8 @@ export const createIncidentSchema = z.object({
     reporterLatitude: z.number(),
     reporterLongitude: z.number(),
     markedUrgent: z.boolean().optional(),
+    // From POST /incidents/photo; the service checks it is one of ours.
+    photoUrl: z.string().max(500, "Photo link is too long").optional(),
 });
 
 export const updateIncidentStatusSchema = z.object({

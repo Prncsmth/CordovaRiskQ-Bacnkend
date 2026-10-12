@@ -13,6 +13,7 @@ import {
 import { canCancelIncident, canViewIncident } from "@/services/incidentAuthorization";
 import { reporterContactFor } from "@/services/reporterContact";
 import { emitAdminActivity, emitAdminIncidentUpdate, emitIncidentUpdate } from "@/realtime/emit";
+import { isIncidentPhotoUrl } from "@/lib/cloudinary";
 import { resolveUrgency } from "@/services/incidentUrgency";
 import { ROSTER_NOTIFICATION_COPY } from "@/services/rosterNotificationCopy";
 import { incidentStatusToAlertOutcome } from "@/services/sosAlertStatus";
@@ -227,6 +228,7 @@ function buildResponderFacingIncident(
         reporterId: string;
         category: string;
         details: string | null;
+        photoUrl: string | null;
         locationLabel: string;
         latitude: number | null;
         longitude: number | null;
@@ -246,6 +248,7 @@ function buildResponderFacingIncident(
         reporterId: incident.reporterId,
         category: incident.category,
         details: incident.details,
+        photoUrl: incident.photoUrl,
         locationLabel: incident.locationLabel,
         latitude: incident.latitude,
         longitude: incident.longitude,
@@ -267,7 +270,7 @@ async function loadReporterContact(reporterId: string, myStatus: string) {
     if (!isActiveStatus(myStatus as ResponderRosterStatus)) return null;
     const reporter = await prisma.user.findUnique({
         where: { id: reporterId },
-        select: { name: true, mobile: true },
+        select: { name: true, mobile: true, avatarUrl: true },
     });
     return reporterContactFor(myStatus as ResponderRosterStatus, reporter);
 }
@@ -316,14 +319,20 @@ export const incidentService = {
             latitude: number;
             longitude: number;
             markedUrgent?: boolean;
+            photoUrl?: string;
         }
     ) {
+        if (data.photoUrl && !isIncidentPhotoUrl(data.photoUrl)) {
+            throw new AppError("That photo wasn't uploaded through Cordova RiskQ", 400);
+        }
         const incident = await prisma.incident.create({
             data: {
                 source: "report",
                 reporterId,
                 category: data.category,
                 details: data.details,
+                // "" (an empty field) means no photo, same as leaving it out.
+                photoUrl: data.photoUrl || null,
                 locationLabel: data.locationLabel,
                 latitude: data.latitude,
                 longitude: data.longitude,
@@ -466,6 +475,7 @@ export const incidentService = {
                 id: incident.id,
                 category: incident.category,
                 details: incident.details,
+                photoUrl: incident.photoUrl,
                 locationLabel: incident.locationLabel,
                 latitude: incident.latitude,
                 longitude: incident.longitude,
