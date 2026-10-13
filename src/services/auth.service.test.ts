@@ -26,11 +26,11 @@ const userDelegate = prisma.user as unknown as Record<Delegate, unknown>;
 const originals = new Map<Delegate, unknown>();
 const calls: Record<Delegate, number> = { findFirst: 0, findUnique: 0, update: 0, create: 0 };
 
-function stub(name: Delegate, impl: () => Promise<unknown>) {
+function stub(name: Delegate, impl: (args?: any) => Promise<unknown>) {
     if (!originals.has(name)) originals.set(name, userDelegate[name]);
-    userDelegate[name] = async () => {
+    userDelegate[name] = async (args?: unknown) => {
         calls[name]++;
-        return impl();
+        return impl(args);
     };
 }
 
@@ -188,6 +188,97 @@ test("loginWithGoogle links an existing citizen matched by email", async () => {
         isOnDuty: false,
     });
     assert.ok(result.token.length > 0);
+});
+
+// --- Google sign-in: account persistence ---------------------------------
+
+function stubGooglePayload(payload: Record<string, unknown>) {
+    mock.method(OAuth2Client.prototype, "verifyIdToken", (async () => ({
+        getPayload: () => ({ email_verified: true, sub: "google-sub", ...payload }),
+    })) as never);
+}
+
+// What Prisma throws when a unique column (googleId / email) already holds
+// the value -- here, because a concurrent first sign-in created the row.
+function uniqueConstraintError() {
+    return Object.assign(new Error("Unique constraint failed"), { code: "P2002" });
+}
+
+test("first-time Google sign-in creates one User with the verified email and Google name", async () => {
+    stubGooglePayload({ email: "New.Person@Gmail.com", name: "New Person" });
+    stub("findUnique", async () => null);
+    stubFindFirst(null);
+    let created: any = null;
+    stub("create", async (args) => {
+        created = args.data;
+        return makeUser("citizen", { email: args.data.email, name: args.data.name, googleId: args.data.googleId, password: null });
+    });
+
+    const result = await authService.loginWithGoogle("token");
+
+    assert.equal(calls.create, 1);
+    assert.deepEqual(created, { email: "new.person@gmail.com", name: "New Person", googleId: "google-sub" });
+    assert.equal(result.isNewUser, true);
+    assert.equal(result.user.email, "new.person@gmail.com");
+});
+
+test("first-time Google sign-in with no display name stores no invented name", async () => {
+    stubGooglePayload({ email: "noname@gmail.com" });
+    stub("findUnique", async () => null);
+    stubFindFirst(null);
+    let created: any = null;
+    stub("create", async (args) => {
+        created = args.data;
+        return makeUser("citizen", { email: args.data.email, name: null, googleId: "google-sub", password: null });
+    });
+
+    const result = await authService.loginWithGoogle("token");
+
+    assert.equal(created.name, undefined);
+    assert.equal(result.user.name, null);
+});
+
+test("returning Google sign-in reuses the linked User and creates nothing", async () => {
+    stubGooglePayload({ email: "citizen@example.com", name: "A" });
+    stub("findUnique", async () => makeUser("citizen", { googleId: "google-sub" }));
+    stub("create", async () => {
+        throw new Error("create must not be called");
+    });
+
+    const result = await authService.loginWithGoogle("token");
+
+    assert.equal(calls.create, 0);
+    assert.equal(result.isNewUser, false);
+    assert.equal(result.user.id, "id-citizen");
+});
+
+test("two simultaneous first sign-ins: the one that loses the create race gets the same account, not a 500", async () => {
+    stubGooglePayload({ email: "racer@gmail.com", name: "Racer" });
+    const winner = makeUser("citizen", { id: "id-racer", email: "racer@gmail.com", googleId: "google-sub", password: null });
+    // Not there on the first lookup; there once the other request committed.
+    let lookups = 0;
+    stub("findUnique", async () => (lookups++ === 0 ? null : winner));
+    stubFindFirst(null);
+    stub("create", async () => {
+        throw uniqueConstraintError();
+    });
+
+    const result = await authService.loginWithGoogle("token");
+
+    assert.equal(result.user.id, "id-racer");
+    assert.equal(result.isNewUser, true);
+    assert.equal(calls.create, 1);
+});
+
+test("a create failure that is not a unique-constraint race is not swallowed", async () => {
+    stubGooglePayload({ email: "broken@gmail.com", name: "B" });
+    stub("findUnique", async () => null);
+    stubFindFirst(null);
+    stub("create", async () => {
+        throw new Error("database unavailable");
+    });
+
+    await assert.rejects(authService.loginWithGoogle("token"), /database unavailable/);
 });
 
 test("stubbed delegates are restored after each test", () => {
