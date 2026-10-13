@@ -175,6 +175,21 @@ export function emitHotlineUpdated(payload: HotlineUpdatePayload): void {
     ioInstance?.emit("hotline:updated", payload);
 }
 
+// Mirrors emitEvacuationCenterUpdated/emitHotlineUpdated -- announcements are
+// shared reference data too (not scoped to one user's own room), so an admin
+// deleting the current one needs to reach every connected citizen and
+// responder screen already showing it, not just whoever next calls
+// GET /api/announcements/active. Fired on every delete, even one that
+// wasn't current -- the open-screen handler just re-fetches the current
+// announcement, a cheap, idempotent no-op when nothing changed for it.
+export interface AnnouncementDeletedPayload {
+    id: string;
+}
+
+export function emitAnnouncementDeleted(payload: AnnouncementDeletedPayload): void {
+    ioInstance?.emit("announcement:deleted", payload);
+}
+
 export interface AdminResponderDutyPayload {
     id: string;
     name: string | null;
