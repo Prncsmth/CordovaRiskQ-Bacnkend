@@ -142,6 +142,12 @@ model Announcement {
   createdBy       User     @relation(fields: [createdByUserId], references: [id])
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
+  // Soft delete: null means live. "current announcement" logic (see
+  // announcementCurrent.ts) must check this on the single newest row it
+  // finds and never fall back to an older one -- see 2026-10's fix for the
+  // bug where deleting the newest announcement let the next-newest one
+  // silently become "current" again.
+  deletedAt       DateTime?
 }
 
 // One row per admin-initiated action -- announcements, responder barangay
