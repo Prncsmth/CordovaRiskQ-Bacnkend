@@ -8,6 +8,7 @@ import bcrypt from "bcrypt";
 import { afterEach, before, mock, test } from "node:test";
 
 import { prisma } from "@/lib/prisma";
+import { onAdminActivity, setIo } from "@/realtime/emit";
 import { logAdminAction } from "@/services/adminAuditLog.service";
 import { authService } from "@/services/auth.service";
 import { evacuationCenterService } from "@/services/evacuationCenter.service";
@@ -26,6 +27,15 @@ before(async () => {
 const originals = new Map<object, Map<string, unknown>>();
 let auditRows: { adminId: string; action: string; detail: string; targetId: string | null }[] = [];
 let transactions = 0;
+const CREATED_AT = new Date("2026-10-16T01:02:03.000Z");
+
+// A fake Socket.IO server that records what reaches the admin room.
+let pushed: { event: string; payload: any }[] = [];
+function listenToAdminRoom() {
+    const record = (event: string, payload: unknown) => pushed.push({ event, payload });
+    // to(room).emit for the admin room; emit for broadcasts like hotline:updated.
+    setIo({ to: () => ({ emit: record }), emit: record } as never);
+}
 
 function stub(target: object, name: string, impl: (args?: any) => unknown) {
     const t = target as Record<string, unknown>;
@@ -47,7 +57,7 @@ function stubAudit({ failCreate = 0 }: { failCreate?: number } = {}) {
             throw new Error("database unavailable");
         }
         auditRows.push(args.data);
-        return args.data;
+        return { ...args.data, createdAt: CREATED_AT };
     });
     stub(prisma, "$transaction", async (fn: (tx: unknown) => unknown) => {
         transactions++;
@@ -63,6 +73,9 @@ afterEach(() => {
     originals.clear();
     auditRows = [];
     transactions = 0;
+    pushed = [];
+    setIo(null);
+    onAdminActivity(null);
 });
 
 // --- evacuation centers ----------------------------------------------------
@@ -241,4 +254,59 @@ test("an audit write that still fails is reported loudly, naming the action", as
 
     assert.equal(auditRows.length, 0);
     assert.ok(errors.some((line) => line.includes("sos_alert_closed") && line.includes("sos-1")));
+});
+
+// --- live: the Audit Logs page updates the moment an action happens ---------
+
+test("an admin action appears in the live feed right away, with the same time as its row", async () => {
+    stubAudit();
+    listenToAdminRoom();
+    const hotline = { id: "bfp", name: "BFP Cordova", number: "0917 111 2222", category: "fire" };
+    stub(prisma.hotline, "findUnique", async () => hotline);
+    stub(prisma.hotline, "update", async (args) => ({ ...hotline, ...args.data }));
+
+    await hotlineService.update("bfp", { number: "0918 333 4444" }, "admin-1");
+
+    const live = pushed.filter((p) => p.event === "admin:activity").map((p) => p.payload);
+    assert.deepEqual(live, [
+        {
+            type: "hotline_updated",
+            title: "Hotline updated",
+            detail: "Admin Juan — BFP Cordova: number 0917 111 2222 → 0918 333 4444",
+            occurredAt: CREATED_AT.toISOString(),
+        },
+    ]);
+});
+
+test("actions recorded after they happen (e.g. sign-in) are pushed live too", async () => {
+    stubAudit();
+    listenToAdminRoom();
+
+    await logAdminAction("admin-1", "admin_login", "Signed in to the admin portal", "admin-1");
+
+    const live = pushed.filter((p) => p.event === "admin:activity").map((p) => p.payload);
+    assert.equal(live.length, 1);
+    assert.equal(live[0].type, "admin_login");
+    assert.equal(live[0].title, "Admin signed in");
+});
+
+test("live audit pushes do not fill every admin's notification inbox", async () => {
+    stubAudit();
+    listenToAdminRoom();
+    const inbox: unknown[] = [];
+    onAdminActivity((activity) => inbox.push(activity));
+
+    await logAdminAction("admin-1", "admin_login", "Signed in to the admin portal", "admin-1");
+
+    assert.equal(inbox.length, 0);
+});
+
+test("a change that is rolled back is never pushed live", async () => {
+    stubAudit({ failCreate: 1 });
+    listenToAdminRoom();
+    stub(prisma.hotline, "findUnique", async () => ({ id: "bfp", name: "BFP", number: "1", category: "fire" }));
+    stub(prisma.hotline, "update", async (args) => ({ id: "bfp", name: "BFP", number: "1", category: "fire", ...args.data }));
+
+    await assert.rejects(hotlineService.update("bfp", { number: "2" }, "admin-1"));
+    assert.equal(pushed.filter((p) => p.event === "admin:activity").length, 0);
 });

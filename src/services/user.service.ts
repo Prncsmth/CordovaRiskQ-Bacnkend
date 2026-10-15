@@ -2,7 +2,7 @@ import bcrypt from "bcrypt";
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
 import { deleteAvatar, isCloudinaryConfigured, uploadAvatar } from "@/lib/cloudinary";
-import { disconnectUserSockets, emitAdminResponderDutyChanged } from "@/realtime/emit";
+import { disconnectUserSockets, emitAdminAuditActivity, emitAdminResponderDutyChanged } from "@/realtime/emit";
 import { assertEmailUnchanged } from "@/services/accountEmail";
 import { describeProfileChange } from "@/services/adminAuditDetails";
 import { AUDITED_TRANSACTION_OPTIONS, logAdminAction, writeAdminAuditLog } from "@/services/adminAuditLog.service";
@@ -83,14 +83,15 @@ export const userService = {
         // An admin's own profile change (admin portal Settings) is an admin
         // action: saved together with its audit row. Citizens and responders
         // are not audited.
-        const user =
+        const { updated: user, activity } =
             current.role === "admin"
                 ? await prisma.$transaction(async (tx) => {
                       const updated = await tx.user.update(update);
-                      await writeAdminAuditLog(tx, userId, "admin_profile_updated", describeProfileChange(current, updated), userId);
-                      return updated;
+                      const activity = await writeAdminAuditLog(tx, userId, "admin_profile_updated", describeProfileChange(current, updated), userId);
+                      return { updated, activity };
                   }, AUDITED_TRANSACTION_OPTIONS)
-                : await prisma.user.update(update);
+                : { updated: await prisma.user.update(update), activity: null };
+        if (activity) emitAdminAuditActivity(activity);
 
         return {
             id: user.id,

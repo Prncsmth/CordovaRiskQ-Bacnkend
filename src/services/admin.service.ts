@@ -1,7 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { AppError } from "@/utils/AppError";
 import { mergeRecentActivity, supportRequestDetail, type AdminActivityItem } from "@/services/adminActivity";
-import { logAdminAction } from "@/services/adminAuditLog.service";
+import { AUDIT_ACTION_TITLE, logAdminAction, type AdminAuditAction } from "@/services/adminAuditLog.service";
 
 const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 const NON_TERMINAL_STATUSES = ["pending", "lobby", "on_the_way", "arrived"];
@@ -9,21 +9,6 @@ const NON_TERMINAL_STATUSES = ["pending", "lobby", "on_the_way", "arrived"];
 // One Recent Activity title per AdminAuditLog action -- the admin's name
 // and the specifics already live in the row's own `detail` (see
 // adminAuditLog.service.ts's logAdminAction).
-const AUDIT_ACTION_TITLE: Record<string, string> = {
-    announcement_created: "Announcement published",
-    announcement_updated: "Announcement edited",
-    announcement_deleted: "Announcement deleted",
-    responder_barangay_updated: "Responder barangay assigned",
-    user_role_updated: "User role changed",
-    support_request_status_updated: "Support request updated",
-    evacuation_center_updated: "Evacuation center updated",
-    hotline_updated: "Hotline updated",
-    sos_alert_closed: "SOS alert closed",
-    admin_login: "Admin signed in",
-    admin_profile_updated: "Admin profile updated",
-    admin_password_changed: "Admin password changed",
-};
-
 export const adminService = {
     async listUsers(filters: {
         search?: string;
@@ -337,7 +322,7 @@ export const adminService = {
             })),
             ...auditLogs.map((log) => ({
                 type: log.action as AdminActivityItem["type"],
-                title: AUDIT_ACTION_TITLE[log.action] ?? "Admin action",
+                title: AUDIT_ACTION_TITLE[log.action as AdminAuditAction] ?? "Admin action",
                 detail: log.detail,
                 occurredAt: log.createdAt.toISOString(),
             })),

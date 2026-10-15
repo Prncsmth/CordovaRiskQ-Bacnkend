@@ -75,6 +75,14 @@ export function emitAdminActivity(activity: AdminActivityItem): void {
     adminActivityListener?.(activity);
 }
 
+// An admin's own audited action (adminAuditLog.service.ts), pushed to the
+// admin room's live feed (Audit Logs page, Recent Activity) the moment it is
+// saved. Unlike emitAdminActivity it does NOT go to every admin's
+// notification inbox -- sign-ins and edits would bury real alerts.
+export function emitAdminAuditActivity(activity: AdminActivityItem): void {
+    ioInstance?.to("admin").emit("admin:activity", activity);
+}
+
 // Also hands each activity to a listener set at startup (server.ts), which
 // saves it to every admin's notification inbox. A hook rather than a direct
 // call because notification.service already imports this module.

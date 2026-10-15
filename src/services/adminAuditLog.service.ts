@@ -1,5 +1,7 @@
 // src/services/adminAuditLog.service.ts
 import { prisma, type DbTransactionClient } from "@/lib/prisma";
+import { emitAdminAuditActivity } from "@/realtime/emit";
+import type { AdminActivityItem } from "@/services/adminActivity";
 
 export type AdminAuditAction =
     | "announcement_created"
@@ -14,6 +16,22 @@ export type AdminAuditAction =
     | "admin_login"
     | "admin_profile_updated"
     | "admin_password_changed";
+
+// How each action reads in the activity feed (REST and live).
+export const AUDIT_ACTION_TITLE: Record<AdminAuditAction, string> = {
+    announcement_created: "Announcement published",
+    announcement_updated: "Announcement edited",
+    announcement_deleted: "Announcement deleted",
+    responder_barangay_updated: "Responder barangay assigned",
+    user_role_updated: "User role changed",
+    support_request_status_updated: "Support request updated",
+    evacuation_center_updated: "Evacuation center updated",
+    hotline_updated: "Hotline updated",
+    sos_alert_closed: "SOS alert closed",
+    admin_login: "Admin signed in",
+    admin_profile_updated: "Admin profile updated",
+    admin_password_changed: "Admin password changed",
+};
 
 // The prisma client or a transaction's client -- whatever the admin action
 // itself is writing through.
@@ -40,10 +58,10 @@ export async function writeAdminAuditLog(
     action: AdminAuditAction,
     detail: string,
     targetId?: string,
-): Promise<string> {
+): Promise<AdminActivityItem> {
     const admin = await client.user.findUnique({ where: { id: adminId }, select: { name: true } });
     const fullDetail = `${admin?.name ?? "An admin"} — ${detail}`;
-    await client.adminAuditLog.create({
+    const row = await client.adminAuditLog.create({
         data: {
             adminId,
             action,
@@ -51,9 +69,16 @@ export async function writeAdminAuditLog(
             targetId: targetId ?? null,
         },
     });
-    // Returned so a live emitAdminActivity push can carry the same detail as
-    // the row the Audit Logs page loads later (the admin app's read-state key).
-    return fullDetail;
+    // The row as the activity feed shows it. Push it live only once the
+    // change is committed (emitAdminAuditActivity, or emitAdminActivity for
+    // an action that also notifies every admin); its detail and time match
+    // what the Audit Logs page loads later (the admin app's read-state key).
+    return {
+        type: action,
+        title: AUDIT_ACTION_TITLE[action],
+        detail: fullDetail,
+        occurredAt: (row.createdAt ?? new Date()).toISOString(),
+    };
 }
 
 // For actions that can't share a transaction with their audit row (sign-in,
@@ -61,7 +86,8 @@ export async function writeAdminAuditLog(
 // action succeeds. A failed write never blocks or undoes the action -- an
 // announcement must still publish, a sign-in must still work -- but it is
 // retried once, and a write that still fails is logged loudly with the
-// action and target, so a gap in the trail is never silent.
+// action and target, so a gap in the trail is never silent. A saved row is
+// pushed live to the admins' activity feed right away.
 export async function logAdminAction(
     adminId: string,
     action: AdminAuditAction,
@@ -70,7 +96,8 @@ export async function logAdminAction(
 ): Promise<void> {
     for (let attempt = 1; attempt <= 2; attempt++) {
         try {
-            await writeAdminAuditLog(prisma, adminId, action, detail, targetId);
+            const activity = await writeAdminAuditLog(prisma, adminId, action, detail, targetId);
+            emitAdminAuditActivity(activity);
             return;
         } catch (error) {
             if (attempt === 2) {

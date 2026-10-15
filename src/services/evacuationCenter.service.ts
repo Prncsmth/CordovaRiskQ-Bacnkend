@@ -15,7 +15,7 @@ export const evacuationCenterService = {
     // one transaction, so every update leaves its own row -- the Audit Logs
     // page no longer has to infer it from the center's updatedAt.
     async update(id: string, data: { status?: string; facilities?: string[] }, adminId: string) {
-        const { updated, detail } = await prisma.$transaction(async (tx) => {
+        const { updated, activity } = await prisma.$transaction(async (tx) => {
             const center = await tx.evacuationCenter.findUnique({ where: { id } });
             if (!center) throw new AppError("Evacuation center not found", 404);
 
@@ -24,22 +24,19 @@ export const evacuationCenterService = {
                 data,
             });
 
-            const detail = await writeAdminAuditLog(
+            const activity = await writeAdminAuditLog(
                 tx,
                 adminId,
                 "evacuation_center_updated",
                 describeEvacuationCenterChange(center.name, center, updated),
                 id,
             );
-            return { updated, detail };
+            return { updated, activity };
         }, AUDITED_TRANSACTION_OPTIONS);
 
-        emitAdminActivity({
-            type: "evacuation_center_updated",
-            title: "Evacuation center updated",
-            detail,
-            occurredAt: updated.updatedAt.toISOString(),
-        });
+        // Pushed only after the commit. Unlike other admin edits this one also
+        // notifies every admin (emitAdminActivity), as before.
+        emitAdminActivity(activity);
         emitEvacuationCenterUpdated({
             id: updated.id,
             status: updated.status,
