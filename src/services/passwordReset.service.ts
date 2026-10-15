@@ -12,6 +12,7 @@ import { disconnectUserSockets } from "@/realtime/emit";
 import {
     resetPassword,
     startPasswordResetRequest,
+    verifyResetCode,
     type PasswordResetDeps,
     type PasswordResetStore,
     type PasswordResetUserStore,
@@ -89,6 +90,10 @@ export const passwordResetService = {
     // Returns at once; the lookup and email happen in the background.
     requestReset(input: { email: string }) {
         return startPasswordResetRequest(input, deps, runInBackground);
+    },
+
+    verifyCode(input: { email: string; code: string }) {
+        return verifyResetCode(input, deps);
     },
 
     reset(input: { email: string; code: string; newPassword: string }) {

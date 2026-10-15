@@ -37,6 +37,11 @@ test("POST /api/auth/forgot-password and /api/auth/reset-password exist and vali
     assert.equal(reset.status, 400);
 });
 
+test("POST /api/auth/verify-reset-code exists and validates input", async () => {
+    const res = await post("/api/auth/verify-reset-code", { email: "not-an-email", code: "123456" });
+    assert.equal(res.status, 400);
+});
+
 test("forgot-password is rate limited per IP (5 requests per 5 minutes)", async () => {
     // One request was already used by the previous test.
     const statuses: number[] = [];
@@ -47,14 +52,14 @@ test("forgot-password is rate limited per IP (5 requests per 5 minutes)", async 
     assert.equal(statuses[4], 429, "the 6th request in the window is rejected");
 });
 
-test("reset-password is rate limited per IP (10 attempts per 5 minutes)", async () => {
+test("reset-password and verify-reset-code share one rate limit per IP (10 attempts per 5 minutes)", async () => {
     const statuses: number[] = [];
     for (let i = 0; i < 10; i++) {
         statuses.push(
             (await post("/api/auth/reset-password", { email: "not-an-email", code: "123456", newPassword: "NewPass1!" })).status,
         );
     }
-    // One reset request was already used by the first test.
-    assert.ok(statuses.slice(0, 9).every((s) => s === 400));
-    assert.equal(statuses[9], 429, "the 11th attempt in the window is rejected");
+    // One reset and one verify-reset-code request were already used above.
+    assert.ok(statuses.slice(0, 8).every((s) => s === 400));
+    assert.equal(statuses[8], 429, "the 11th code attempt in the window is rejected");
 });

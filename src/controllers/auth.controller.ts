@@ -32,6 +32,12 @@ export const authController = {
         res.status(200).json({ success: true, ...result });
     }),
 
+    verifyResetCode: asyncHandler(async (req: Request, res: Response) => {
+        const { email, code } = req.body;
+        const result = await passwordResetService.verifyCode({ email, code });
+        res.status(200).json({ success: true, ...result });
+    }),
+
     resetPassword: asyncHandler(async (req: Request, res: Response) => {
         const { email, code, newPassword } = req.body;
         const result = await passwordResetService.reset({ email, code, newPassword });

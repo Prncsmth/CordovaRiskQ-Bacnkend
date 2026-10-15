@@ -43,6 +43,12 @@ export const forgotPasswordSchema = z.object({
     email: emailField,
 });
 
+// The "Enter code" step of password reset: the code only, no new password yet.
+export const verifyResetCodeSchema = z.object({
+    email: emailField,
+    code: otpCodeField,
+});
+
 // newPassword follows the same shared policy as registration.
 export const resetPasswordSchema = z.object({
     email: emailField,

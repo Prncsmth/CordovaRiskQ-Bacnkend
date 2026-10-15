@@ -16,6 +16,7 @@ export const FORGOT_PASSWORD_MESSAGE =
     "If an account exists, a password reset code has been sent to your email.";
 export const INVALID_RESET_CODE_MESSAGE = "Invalid or expired code. Request a new one.";
 export const PASSWORD_RESET_SUCCESS_MESSAGE = "Your password has been reset. You can now log in.";
+export const RESET_CODE_VERIFIED_MESSAGE = "Code verified. You can now set a new password.";
 
 export type PasswordResetRow = {
     email: string;
@@ -125,32 +126,53 @@ export function startPasswordResetRequest(
     return genericResponse(deps.config);
 }
 
-export async function resetPassword(
-    input: { email: string; code: string; newPassword: string },
-    deps: PasswordResetDeps,
-): Promise<{ message: string }> {
-    const email = normalizeEmail(input.email);
-    const invalid = () => new AppError(INVALID_RESET_CODE_MESSAGE, 400);
+const invalidResetCode = () => new AppError(INVALID_RESET_CODE_MESSAGE, 400);
 
+// Throws the generic error unless `code` is the current, unexpired code for
+// `email`. A wrong guess counts an attempt, and the last allowed wrong guess
+// deletes the code -- the same budget whether it is spent here through
+// verify-reset-code or through reset-password.
+async function checkResetCode(email: string, code: string, deps: PasswordResetDeps): Promise<void> {
     const row = await deps.resetStore.findByEmail(email);
-    if (!row) throw invalid();
+    if (!row) throw invalidResetCode();
 
-    if (row.otpExpiresAt.getTime() < deps.now().getTime()) throw invalid();
+    if (row.otpExpiresAt.getTime() < deps.now().getTime()) throw invalidResetCode();
 
     if (row.attempts >= deps.config.maxAttempts) {
         await deps.resetStore.consume(email);
-        throw invalid();
+        throw invalidResetCode();
     }
 
-    if (!(await deps.compareHash(input.code, row.otpHash))) {
+    if (!(await deps.compareHash(code, row.otpHash))) {
         if (row.attempts + 1 >= deps.config.maxAttempts) {
             // Out of attempts: the code is dead, so delete it outright.
             await deps.resetStore.consume(email);
         } else {
             await deps.resetStore.incrementAttempts(email);
         }
-        throw invalid();
+        throw invalidResetCode();
     }
+}
+
+// The app's "Enter code" step: confirms the code before asking for a new
+// password. It does not use the code up -- reset-password checks it again
+// and consumes it -- so this step cannot be used to skip that check.
+export async function verifyResetCode(
+    input: { email: string; code: string },
+    deps: PasswordResetDeps,
+): Promise<{ message: string }> {
+    await checkResetCode(normalizeEmail(input.email), input.code, deps);
+    return { message: RESET_CODE_VERIFIED_MESSAGE };
+}
+
+export async function resetPassword(
+    input: { email: string; code: string; newPassword: string },
+    deps: PasswordResetDeps,
+): Promise<{ message: string }> {
+    const email = normalizeEmail(input.email);
+    const invalid = invalidResetCode;
+
+    await checkResetCode(email, input.code, deps);
 
     // Single use: consume before changing anything, so two simultaneous
     // requests with the same correct code can't both succeed.

@@ -14,6 +14,7 @@ import {
     resendRegistrationOtpSchema,
     verifyRegistrationOtpSchema,
     forgotPasswordSchema,
+    verifyResetCodeSchema,
     resetPasswordSchema,
 } from "@/validations/auth.validation";
 
@@ -41,13 +42,21 @@ router.post(
     authController.verifyRegistrationOtp
 );
 // Forgot password: emails a 6-digit code (same limiter as the other
-// code-sending routes), then reset-password checks it (same limiter as
-// verify-otp, capping code guessing per IP on top of the per-code limit).
+// code-sending routes). verify-reset-code then checks the code on its own
+// (the app's "Enter code" step), and reset-password checks it again and sets
+// the new password. Both share verify-otp's limiter, capping code guessing
+// per IP on top of the per-code attempt limit.
 router.post(
     "/auth/forgot-password",
     requestOtpLimiter,
     validate(forgotPasswordSchema),
     authController.forgotPassword
+);
+router.post(
+    "/auth/verify-reset-code",
+    verifyOtpLimiter,
+    validate(verifyResetCodeSchema),
+    authController.verifyResetCode
 );
 router.post(
     "/auth/reset-password",

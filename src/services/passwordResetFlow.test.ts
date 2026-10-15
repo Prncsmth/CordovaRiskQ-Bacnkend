@@ -6,9 +6,11 @@ import { DEFAULT_OTP_CONFIG } from "@/services/pendingRegistrationFlow";
 import {
     FORGOT_PASSWORD_MESSAGE,
     INVALID_RESET_CODE_MESSAGE,
+    RESET_CODE_VERIFIED_MESSAGE,
     requestPasswordReset,
     resetPassword,
     startPasswordResetRequest,
+    verifyResetCode,
     type PasswordResetDeps,
     type PasswordResetRow,
 } from "@/services/passwordResetFlow";
@@ -365,6 +367,64 @@ test("a Google-only account cannot have a password set through reset", async () 
         INVALID_RESET_CODE_MESSAGE,
     );
     assert.equal(passwordUpdates.length, 0);
+});
+
+// --- verify-reset-code: checks the code on its own, before the new password --
+
+test("verify-reset-code accepts the correct code without using it up or changing the password", async () => {
+    const { deps, resetRows, passwordUpdates, lastCode } = createFakeDeps();
+    await requestPasswordReset({ email: "juana@example.com" }, deps);
+    const code = lastCode();
+
+    const result = await verifyResetCode({ email: " JUANA@example.com ", code }, deps);
+
+    assert.deepEqual(result, { message: RESET_CODE_VERIFIED_MESSAGE });
+    assert.equal(resetRows.get("juana@example.com")!.attempts, 0);
+    assert.equal(passwordUpdates.length, 0);
+    // The same code still completes the reset afterwards.
+    await resetPassword({ email: "juana@example.com", code, newPassword: "NewPass1!" }, deps);
+    assert.equal(passwordUpdates.length, 1);
+});
+
+test("verify-reset-code rejects a wrong code with the generic error and counts an attempt", async () => {
+    const { deps, resetRows, lastCode } = createFakeDeps();
+    await requestPasswordReset({ email: "juana@example.com" }, deps);
+
+    await rejectsWithStatus(
+        verifyResetCode({ email: "juana@example.com", code: wrongCodeFor(lastCode()) }, deps),
+        400,
+        INVALID_RESET_CODE_MESSAGE,
+    );
+    assert.equal(resetRows.get("juana@example.com")!.attempts, 1);
+});
+
+test("wrong guesses on verify and reset share one attempt limit", async () => {
+    const { deps, resetRows, passwordUpdates, lastCode } = createFakeDeps();
+    await requestPasswordReset({ email: "juana@example.com" }, deps);
+    const real = lastCode();
+    const wrong = wrongCodeFor(real);
+
+    for (let i = 0; i < 3; i++) {
+        await rejectsWithStatus(verifyResetCode({ email: "juana@example.com", code: wrong }, deps), 400);
+    }
+    for (let i = 0; i < 2; i++) {
+        await rejectsWithStatus(resetPassword({ email: "juana@example.com", code: wrong, newPassword: "NewPass1!" }, deps), 400);
+    }
+    assert.equal(resetRows.size, 0, "five wrong guesses in total use up the code");
+    await rejectsWithStatus(verifyResetCode({ email: "juana@example.com", code: real }, deps), 400, INVALID_RESET_CODE_MESSAGE);
+    assert.equal(passwordUpdates.length, 0);
+});
+
+test("verify-reset-code gives the same generic error for an expired code, an unknown email and a Google-only account", async () => {
+    const { deps, advanceClock, lastCode } = createFakeDeps();
+    await requestPasswordReset({ email: "juana@example.com" }, deps);
+    await requestPasswordReset({ email: "google.only@example.com" }, deps);
+    const code = lastCode();
+    advanceClock(TEN_MINUTES + 1);
+
+    await rejectsWithStatus(verifyResetCode({ email: "juana@example.com", code }, deps), 400, INVALID_RESET_CODE_MESSAGE);
+    await rejectsWithStatus(verifyResetCode({ email: "nobody@example.com", code: "123456" }, deps), 400, INVALID_RESET_CODE_MESSAGE);
+    await rejectsWithStatus(verifyResetCode({ email: "google.only@example.com", code: "123456" }, deps), 400, INVALID_RESET_CODE_MESSAGE);
 });
 
 test("reset never creates an account", async () => {
