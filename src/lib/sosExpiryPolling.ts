@@ -9,7 +9,7 @@ const POLL_INTERVAL_MS = 60 * 1000;
 // Also used by sos.service.ts to age out alerts that have no incident.
 export function sosExpiryMs(): number {
     const minutes = Number(process.env.SOS_EXPIRY_MINUTES);
-    return (Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_EXPIRY_MINUTES) * 30 * 1000;
+    return (Number.isFinite(minutes) && minutes > 0 ? minutes : DEFAULT_EXPIRY_MINUTES) * 60 * 1000;
 }
 
 let pollInFlight = false;
