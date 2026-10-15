@@ -38,7 +38,7 @@ export const sosController = {
     }),
 
     closeForAdmin: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const alert = await sosService.closeForAdmin(req.params.id as string, req.body.outcome);
+        const alert = await sosService.closeForAdmin(req.params.id as string, req.body.outcome, req.userId!);
         res.status(200).json({ success: true, alert });
     }),
 };

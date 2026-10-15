@@ -5,6 +5,7 @@ import { AppError } from "@/utils/AppError";
 import { verifiedGoogleEmail } from "@/services/accountEmail";
 import { issueSessionToken } from "@/services/sessionAuth";
 import { emitAdminActivity } from "@/realtime/emit";
+import { logAdminAction } from "@/services/adminAuditLog.service";
 import { assertPortalAllowed } from "@/services/loginPortal";
 
 const googleClient = new OAuth2Client(process.env.GOOGLE_WEB_CLIENT_ID);
@@ -103,6 +104,8 @@ export const authService = {
         assertPortalAllowed(user.role, "admin");
 
         const token = issueSessionToken(user);
+        // Successful sign-ins only; failed attempts are not recorded yet.
+        await logAdminAction(user.id, "admin_login", "Signed in to the admin portal", user.id);
         return { user: sessionUser(user), token };
     },
 

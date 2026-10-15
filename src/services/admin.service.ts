@@ -16,6 +16,12 @@ const AUDIT_ACTION_TITLE: Record<string, string> = {
     responder_barangay_updated: "Responder barangay assigned",
     user_role_updated: "User role changed",
     support_request_status_updated: "Support request updated",
+    evacuation_center_updated: "Evacuation center updated",
+    hotline_updated: "Hotline updated",
+    sos_alert_closed: "SOS alert closed",
+    admin_login: "Admin signed in",
+    admin_profile_updated: "Admin profile updated",
+    admin_password_changed: "Admin password changed",
 };
 
 export const adminService = {
@@ -236,7 +242,7 @@ export const adminService = {
         const cappedLimit = Math.min(Math.max(limit, 1), 100);
         const take = cappedLimit;
 
-        const [sosAlerts, reportedIncidents, joinedRows, resolvedIncidents, evacuationCenters, newUsers, supportRequests, auditLogs] = await Promise.all([
+        const [sosAlerts, reportedIncidents, joinedRows, resolvedIncidents, newUsers, supportRequests, auditLogs] = await Promise.all([
             prisma.sosAlert.findMany({
                 orderBy: { createdAt: "desc" },
                 take,
@@ -260,10 +266,6 @@ export const adminService = {
             }),
             prisma.incident.findMany({
                 where: { status: "completed" },
-                orderBy: { updatedAt: "desc" },
-                take,
-            }),
-            prisma.evacuationCenter.findMany({
                 orderBy: { updatedAt: "desc" },
                 take,
             }),
@@ -319,12 +321,8 @@ export const adminService = {
                 detail: incident.locationLabel,
                 occurredAt: incident.updatedAt.toISOString(),
             })),
-            ...evacuationCenters.map((center) => ({
-                type: "evacuation_center_updated" as const,
-                title: "Evacuation center updated",
-                detail: center.name,
-                occurredAt: center.updatedAt.toISOString(),
-            })),
+            // Evacuation center updates come from the audit log below (one row
+            // per update, with who changed what), not the center's updatedAt.
             ...newUsers.map((user) => ({
                 type: "user_registered" as const,
                 title: "New user registered",

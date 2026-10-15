@@ -4,6 +4,8 @@ import { AppError } from "@/utils/AppError";
 import { deleteAvatar, isCloudinaryConfigured, uploadAvatar } from "@/lib/cloudinary";
 import { disconnectUserSockets, emitAdminResponderDutyChanged } from "@/realtime/emit";
 import { assertEmailUnchanged } from "@/services/accountEmail";
+import { describeProfileChange } from "@/services/adminAuditDetails";
+import { AUDITED_TRANSACTION_OPTIONS, logAdminAction, writeAdminAuditLog } from "@/services/adminAuditLog.service";
 import { changePassword } from "@/services/changePasswordFlow";
 import { issueSessionToken, passwordUpdateData } from "@/services/sessionAuth";
 
@@ -67,7 +69,7 @@ export const userService = {
     ) {
         const current = await prisma.user.findUnique({
             where: { id: userId },
-            select: { email: true },
+            select: { email: true, name: true, role: true },
         });
         if (!current) throw new AppError("User not found", 404);
 
@@ -77,13 +79,18 @@ export const userService = {
         // still fine.
         assertEmailUnchanged(current.email, data.email);
 
-        const user = await prisma.user.update({
-            where: { id: userId },
-            data: {
-                name: data.name,
-                mobile: data.mobile,
-            },
-        });
+        const update = { where: { id: userId }, data: { name: data.name, mobile: data.mobile } };
+        // An admin's own profile change (admin portal Settings) is an admin
+        // action: saved together with its audit row. Citizens and responders
+        // are not audited.
+        const user =
+            current.role === "admin"
+                ? await prisma.$transaction(async (tx) => {
+                      const updated = await tx.user.update(update);
+                      await writeAdminAuditLog(tx, userId, "admin_profile_updated", describeProfileChange(current, updated), userId);
+                      return updated;
+                  }, AUDITED_TRANSACTION_OPTIONS)
+                : await prisma.user.update(update);
 
         return {
             id: user.id,
@@ -95,8 +102,8 @@ export const userService = {
 
     // Logs out every other session for this user and returns a fresh token
     // for the caller's own device (see changePasswordFlow.ts).
-    changePassword(userId: string, data: { oldPassword: string; newPassword: string }) {
-        return changePassword(userId, data, {
+    async changePassword(userId: string, data: { oldPassword: string; newPassword: string }) {
+        const result = await changePassword(userId, data, {
             findUser: (id) =>
                 prisma.user.findUnique({ where: { id }, select: { id: true, password: true } }),
             compareHash: (value, hash) => bcrypt.compare(value, hash),
@@ -112,6 +119,14 @@ export const userService = {
             // which reopens them with the fresh token it gets back.
             onPasswordChanged: disconnectUserSockets,
         });
+
+        // An admin changing their own password is recorded -- the action only,
+        // never the old or new password or the token.
+        const changed = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+        if (changed?.role === "admin") {
+            await logAdminAction(userId, "admin_password_changed", "Changed their password", userId);
+        }
+        return result;
     },
 
     async updatePushToken(userId: string, token: string | null) {

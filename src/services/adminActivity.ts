@@ -19,7 +19,12 @@ export type AdminActivityType =
     | "announcement_deleted"
     | "responder_barangay_updated"
     | "user_role_updated"
-    | "support_request_status_updated";
+    | "support_request_status_updated"
+    | "hotline_updated"
+    | "sos_alert_closed"
+    | "admin_login"
+    | "admin_profile_updated"
+    | "admin_password_changed";
 
 export interface AdminActivityItem {
     type: AdminActivityType;

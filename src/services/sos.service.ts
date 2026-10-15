@@ -2,6 +2,8 @@ import { prisma, type DbTransactionClient } from "@/lib/prisma";
 import type { Incident } from "@/generated/prisma/client";
 import { incidentService, NON_TERMINAL_STATUSES } from "@/services/incident.service";
 import { emitAdminActivity } from "@/realtime/emit";
+import { describeSosClose } from "@/services/adminAuditDetails";
+import { logAdminAction } from "@/services/adminAuditLog.service";
 import {
     type AdminCloseOutcome,
     type AlertStatus,
@@ -251,12 +253,17 @@ export const sosService = {
         return countAlertsByStatus(allAlerts, incidentStatusByAlertId, new Date(), sosExpiryMs());
     },
 
-    async closeForAdmin(sosAlertId: string, outcome: AdminCloseOutcome) {
+    // Recorded in the audit log only once the alert is actually closed. Closing
+    // touches the incident, its roster and live events (incidentService), so
+    // the audit row is written right after rather than in one transaction --
+    // see logAdminAction.
+    async closeForAdmin(sosAlertId: string, outcome: AdminCloseOutcome, adminId: string) {
         const incidentStatus = adminCloseOutcomeToIncidentStatus(outcome);
         const linked = await prisma.incident.findFirst({ where: { sosAlertId }, select: { id: true } });
 
         if (linked) {
             const incident = await incidentService.closeSosByAdmin(sosAlertId, incidentStatus);
+            await logAdminAction(adminId, "sos_alert_closed", describeSosClose(outcome, incident.locationLabel), sosAlertId);
             return { id: sosAlertId, incidentId: incident.id, incidentStatus: incident.status };
         }
 
@@ -273,6 +280,8 @@ export const sosService = {
                 ? new AppError("This SOS alert is already closed", 409)
                 : new AppError("SOS alert not found", 404);
         }
+        // An alert with no incident has no location of its own.
+        await logAdminAction(adminId, "sos_alert_closed", describeSosClose(outcome, null), sosAlertId);
         return { id: sosAlertId, incidentId: null, incidentStatus: null };
     },
 };

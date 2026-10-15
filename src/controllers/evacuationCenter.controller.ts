@@ -10,7 +10,7 @@ export const evacuationCenterController = {
     }),
 
     update: asyncHandler(async (req: AuthenticatedRequest, res: Response) => {
-        const center = await evacuationCenterService.update(req.params.id as string, req.body);
+        const center = await evacuationCenterService.update(req.params.id as string, req.body, req.userId!);
         res.status(200).json({ success: true, center });
     }),
 };
