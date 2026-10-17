@@ -13,6 +13,7 @@ import evacuationCenterRoutes from "@/routes/evacuationCenter.routes";
 import responderRoutes from "@/routes/responder.routes";
 import hotlineRoutes from "@/routes/hotline.routes";
 import supportRequestRoutes from "@/routes/supportRequest.routes";
+import reviewRoutes from "@/routes/review.routes";
 
 // Central router — mount all feature route files here.
 // As you add new resources, do: router.use(entityRoutes) below.
@@ -32,6 +33,7 @@ router.use(evacuationCenterRoutes);
 router.use(responderRoutes);
 router.use(hotlineRoutes);
 router.use(supportRequestRoutes);
+router.use(reviewRoutes);
 
 export default router;
 

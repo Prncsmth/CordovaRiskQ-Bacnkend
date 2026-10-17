@@ -20,6 +20,7 @@ export type AdminActivityType =
     | "responder_barangay_updated"
     | "user_role_updated"
     | "support_request_status_updated"
+    | "review_moderated"
     | "hotline_updated"
     | "sos_alert_closed"
     | "admin_login"

@@ -216,3 +216,19 @@ model SupportRequest {
   @@index([status, createdAt])
   @@index([userId])
 }
+
+// Public ratings and comments from the website (cordova-riskq website's
+// Reviews section). Anyone can submit without an account, so every review
+// starts "pending" and only shows publicly once an admin approves it.
+model Review {
+  id        String   @id @default(uuid())
+  name      String?  // optional display name; shown as "Anonymous" when empty
+  rating    Int      // 1-5 stars
+  title     String?  // optional headline, e.g. "Very helpful during floods"
+  comment   String
+  status    String   @default("pending") // "pending" | "approved" | "rejected"
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([status, createdAt])
+}

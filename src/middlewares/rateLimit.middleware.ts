@@ -135,6 +135,14 @@ export const avatarLimiter = createRateLimiter(
     perUserKey
 );
 
+// Public website reviews (no account): a few per hour per IP is plenty for
+// a real visitor and keeps one person from flooding the moderation queue.
+export const reviewLimiter = createRateLimiter(
+    60 * 60 * 1000,
+    3,
+    "Too many reviews sent from this network recently. Please try again later."
+);
+
 export const supportRequestLimiter = createRateLimiter(
     60 * 60 * 1000,
     10,

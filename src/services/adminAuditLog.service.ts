@@ -10,6 +10,7 @@ export type AdminAuditAction =
     | "responder_barangay_updated"
     | "user_role_updated"
     | "support_request_status_updated"
+    | "review_moderated"
     | "evacuation_center_updated"
     | "hotline_updated"
     | "sos_alert_closed"
@@ -25,6 +26,7 @@ export const AUDIT_ACTION_TITLE: Record<AdminAuditAction, string> = {
     responder_barangay_updated: "Responder barangay assigned",
     user_role_updated: "User role changed",
     support_request_status_updated: "Support request updated",
+    review_moderated: "Review moderated",
     evacuation_center_updated: "Evacuation center updated",
     hotline_updated: "Hotline updated",
     sos_alert_closed: "SOS alert closed",
